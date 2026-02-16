@@ -151,6 +151,17 @@ def build_tutor_rows(tutors: list[dict]) -> pd.DataFrame:
     df["cert_subjects"] = df["cert_subjects"].apply(lambda x: x if isinstance(x, list) else [])
     return df
 
+def mask_has_any_language(df: pd.DataFrame, langs: list[str]) -> pd.Series:
+    """Boolean mask: row has ANY of the selected languages. Safe on empty frames."""
+    if df.empty:
+        return pd.Series([], dtype=bool, index=df.index)
+    selected = [str(l).strip() for l in (langs or []) if str(l).strip()]
+    if not selected:
+        return pd.Series([True]*len(df), dtype=bool, index=df.index)
+    s = df["languages"].apply(lambda ls: any(l in (ls or []) for l in selected))
+    # Ensure boolean dtype and aligned index
+    return s.fillna(False).astype(bool)
+
 def grade_label_to_int(label) -> int:
     s = str(label).strip().upper()
     if s in {"K", "KG", "KINDER", "KINDERGARTEN"}:
@@ -425,7 +436,7 @@ if sheets and "Math Specialty Coverage" in sheets:
             if f_grades:
                 mflt = mflt[mflt["grade"].isin(f_grades)]
             if f_langs:
-                mflt = mflt[mflt["languages"].apply(lambda ls: any(l in (ls or []) for l in f_langs))]
+                mflt = mflt.loc[mask_has_any_language(mflt, f_langs)]
             if require_math:
                 mflt = mflt[mflt["has_math_cert"] == True]
             if require_sped:
@@ -484,7 +495,7 @@ else:
     if f_specs:
         flt = flt[flt["math_specialty"].isin(f_specs)]
     if f_langs:
-        flt = flt[flt["languages"].apply(lambda ls: any(l in (ls or []) for l in f_langs))]
+        flt = flt.loc[mask_has_any_language(flt, f_langs)]
 
     if require_ela:
         flt = flt[flt["has_ela_cert"] == True]
