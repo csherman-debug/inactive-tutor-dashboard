@@ -205,11 +205,25 @@ if sheets and "Coverage Matrix" in sheets and "Certified Coverage Matrix" in she
     st.bar_chart(chart_df)
 
 # Math Specialty Coverage
-if sheets and "Math Specialty Coverage" in sheets:
-    st.header("Math Specialty Coverage")
-    ms = sheets["Math Specialty Coverage"]
-    ms = ms.sort_values(ms.columns[-1], ascending=False)
-    st.bar_chart(ms.set_index(ms.columns[0]))
+import matplotlib.pyplot as plt
+
+ms = ms[[specialty_col, count_col]].dropna().sort_values(count_col, ascending=False)
+
+fig, ax = plt.subplots()
+ax.bar(ms[specialty_col].astype(str), ms[count_col])
+
+ax.set_ylabel("Inactive tutor count")
+ax.set_xlabel("Math specialty")
+ax.set_title("Math Specialty Coverage")
+
+ax.tick_params(axis="x", rotation=45)
+
+# Annotate values
+for i, v in enumerate(ms[count_col].tolist()):
+    ax.text(i, v, str(int(v)), ha="center", va="bottom")
+
+st.pyplot(fig, clear_figure=True)
+
 
 # Special Certification Flags
 if sheets and "Special Certification Flags" in sheets:
