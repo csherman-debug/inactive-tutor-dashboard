@@ -23,12 +23,22 @@ HS_SPECIALTIES = {
 }
 
 def expand_grade_band(band: str):
+    if band is None:
+        return []
+    band = str(band).strip()
+
+    # NEW: handle values like "Math: Algebra 1"
+    if ":" in band:
+        band = band.split(":", 1)[1].strip()
+
     if band in BAND_TO_GRADES:
         return BAND_TO_GRADES[band]
+
     if band in HS_SPECIALTIES:
-        # treat HS specialties as HS grades (customize as needed)
         return [9, 10, 11, 12]
+
     return []
+
 
 @st.cache_data
 def load_workbook(path: str):
@@ -65,13 +75,18 @@ def build_tutor_long_from_json(tutors: list):
         # grade bands = coverage
         for gb in t.get("grade_bands", []) or []:
             cov_subject = gb.get("subject")
-            band = gb.get("grade_band")
-            grades = expand_grade_band(band)
+            band_raw = gb.get("grade_band")
+            band = str(band_raw).strip() if band_raw is not None else ""
 
-            # Specialty: only for Math when band isn't a grade range
+            # NEW: normalize "Math: Algebra 1" -> "Algebra 1"
+            band_norm = band.split(":", 1)[1].strip() if ":" in band else band
+
+            grades = expand_grade_band(band)
+            
             specialty = None
-            if cov_subject == "Math" and band not in BAND_TO_GRADES:
-                specialty = band
+            if cov_subject == "Math" and band_norm not in BAND_TO_GRADES and band_norm:
+                specialty = band_norm
+
 
             for g in grades:
                 rows.append({
