@@ -104,19 +104,34 @@ st.title("Inactive Tutor Executive Dashboard")
 st.sidebar.header("Data files")
 st.sidebar.write(f"• Excel expected: **{EXCEL_FILE}**")
 st.sidebar.write(f"• Optional JSON (enables tutor lookup & filters): **{JSON_FILE}**")
-import os
-st.sidebar.markdown("**Files Streamlit sees in the app folder:**")
-st.sidebar.code("\n".join(sorted(os.listdir("."))))
-st.sidebar.markdown("**Subfolders:**")
-st.sidebar.code("\n".join(sorted([p for p in os.listdir(".") if os.path.isdir(p)])) or "(none)")
 
 excel_exists = Path(EXCEL_FILE).exists()
 json_exists = Path(JSON_FILE).exists()
 import os
-if not json_exists:
-    st.sidebar.error(f"Can't find {JSON_FILE}")
-    st.sidebar.write("Files in app directory:")
-    st.sidebar.write(os.listdir("."))
+
+st.sidebar.markdown("### JSON Debug")
+st.sidebar.write("json_exists:", json_exists)
+
+if json_exists:
+    # show file size
+    size_mb = os.path.getsize(JSON_FILE) / (1024 * 1024)
+    st.sidebar.write("json_size_mb:", round(size_mb, 2))
+
+    # show first line (this catches Git LFS pointers instantly)
+    with open(JSON_FILE, "r", encoding="utf-8", errors="replace") as f:
+        first_line = f.readline().strip()
+    st.sidebar.write("json_first_line:", first_line[:120])
+
+    # try parsing
+    try:
+        import json
+        with open(JSON_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        st.sidebar.write("json_type:", type(data).__name__)
+        st.sidebar.write("json_len:", len(data) if hasattr(data, "__len__") else "n/a")
+    except Exception as e:
+        st.sidebar.error("JSON failed to load:")
+        st.sidebar.exception(e)
 
 
 if not excel_exists:
