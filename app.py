@@ -104,6 +104,11 @@ st.title("Inactive Tutor Executive Dashboard")
 st.sidebar.header("Data files")
 st.sidebar.write(f"• Excel expected: **{EXCEL_FILE}**")
 st.sidebar.write(f"• Optional JSON (enables tutor lookup & filters): **{JSON_FILE}**")
+import os
+st.sidebar.markdown("**Files Streamlit sees in the app folder:**")
+st.sidebar.code("\n".join(sorted(os.listdir("."))))
+st.sidebar.markdown("**Subfolders:**")
+st.sidebar.code("\n".join(sorted([p for p in os.listdir(".") if os.path.isdir(p)])) or "(none)")
 
 excel_exists = Path(EXCEL_FILE).exists()
 json_exists = Path(JSON_FILE).exists()
