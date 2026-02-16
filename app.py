@@ -109,6 +109,8 @@ def build_tutor_rows(tutors: list[dict]) -> pd.DataFrame:
         tutor_id = t.get("tutor_id")
         name = t.get("name")
 
+        email = t.get(\"email\")
+
         langs = t.get("languages", []) or []
         langs_norm = sorted({str(x).strip() for x in langs if str(x).strip()})
         langs_str = ", ".join(langs_norm)
@@ -132,6 +134,7 @@ def build_tutor_rows(tutors: list[dict]) -> pd.DataFrame:
                 rows.append({
                     "tutor_id": tutor_id,
                     "name": name,
+                    "email": email,
                     "coverage_subject": cov_subject,
                     "grade": int(g),
                     "math_specialty": specialty,
@@ -491,6 +494,7 @@ else:
         flt = flt[flt["coverage_subject"].isin(f_subjects)]
     if f_grades:
         flt = flt[flt["grade"].isin(f_grades)]
+
     if f_specs:
         flt = flt[flt["math_specialty"].isin(f_specs)]
     if f_langs:
@@ -510,7 +514,6 @@ else:
     if search:
         flt = flt[flt["name"].fillna("").str.contains(search, case=False)]
 
-    # --- GROUP FOR DISPLAY + EXPORT ---
     tutors_df = (
         flt.groupby(["tutor_id", "name"], as_index=False)
         .agg(
@@ -523,24 +526,14 @@ else:
         .sort_values("name")
     )
 
-    # If email exists in the JSON, merge it in
-    if "email" in tutor_long.columns:
-        email_map = tutor_long.groupby("tutor_id")["email"].first().reset_index()
-        tutors_df = tutors_df.merge(email_map, on="tutor_id", how="left")
-
     st.subheader("Results")
     st.write(f"Matching tutor-grade rows: **{len(flt):,}**")
     st.write(f"Unique tutors: **{len(tutors_df):,}**")
+    st.dataframe(tutors_df, use_container_width=True, hide_index=True)
 
-    # --- DISPLAY VERSION (hide tutor_id only visually) ---
-    display_df = tutors_df.drop(columns=["tutor_id"], errors="ignore")
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-    # --- EXPORT VERSION (includes tutor_id) ---
     st.subheader("Export")
     out = io.BytesIO()
     tutors_df.to_excel(out, index=False, engine="openpyxl")
-
     st.download_button(
         "Download filtered tutors (Excel)",
         data=out.getvalue(),
