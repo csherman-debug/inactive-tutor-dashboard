@@ -162,6 +162,14 @@ def grade_label_to_int(label) -> int:
 def sort_grade_cols(cols):
     return sorted(cols, key=grade_label_to_int)
 
+def display_grade_label(label) -> str:
+    g = grade_label_to_int(label)
+    if g == 0:
+        return "K"
+    if g == 999:
+        return str(label)
+    return str(g)
+
 def make_grade_band_series(series_by_grade_label: pd.Series) -> pd.Series:
     items = []
     for lbl, val in series_by_grade_label.items():
@@ -259,6 +267,8 @@ else:
 if sheets and "Special Certification Flags" in sheets:
     st.subheader("Special Certification Flags")
     flags = clean_excel_df(sheets["Special Certification Flags"])
+    # Drop any real "index" columns that may exist in the sheet
+    flags = flags.loc[:, ~flags.columns.astype(str).str.match(r"(?i)^index(\.|$)")]
     st.dataframe(flags, use_container_width=True, hide_index=True)
 
 # -----------------------------
@@ -283,7 +293,7 @@ if sheets and "Coverage Matrix" in sheets:
     show_cert = st.checkbox("Show certified coverage overlay", value=True)
 
     if view_mode == "Grades":
-        chart_df = pd.DataFrame({"Total Coverage": total_row.values}, index=[str(g) for g in grade_cols])
+        chart_df = pd.DataFrame({"Total Coverage": total_row.values}, index=[display_grade_label(g) for g in grade_cols])
         if show_cert and cert is not None and subject in cert[subject_col].values:
             cert_row = cert.loc[cert[subject_col] == subject, grade_cols].iloc[0].fillna(0)
             cert_row = pd.to_numeric(cert_row, errors="coerce").fillna(0).astype(int)
