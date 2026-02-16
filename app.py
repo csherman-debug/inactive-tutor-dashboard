@@ -124,26 +124,19 @@ excel_exists = Path(EXCEL_FILE).exists()
 json_exists = Path(JSON_FILE).exists()
 import os
 
-st.sidebar.markdown("### JSON Debug")
-st.sidebar.write("json_exists:", json_exists)
-
 if json_exists:
     # show file size
     size_mb = os.path.getsize(JSON_FILE) / (1024 * 1024)
-    st.sidebar.write("json_size_mb:", round(size_mb, 2))
 
     # show first line (this catches Git LFS pointers instantly)
     with open(JSON_FILE, "r", encoding="utf-8", errors="replace") as f:
         first_line = f.readline().strip()
-    st.sidebar.write("json_first_line:", first_line[:120])
 
     # try parsing
     try:
         import json
         with open(JSON_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        st.sidebar.write("json_type:", type(data).__name__)
-        st.sidebar.write("json_len:", len(data) if hasattr(data, "__len__") else "n/a")
     except Exception as e:
         st.sidebar.error("JSON failed to load:")
         st.sidebar.exception(e)
@@ -236,12 +229,6 @@ if sheets and "State Certification Counts" in sheets:
 
 st.divider()
 st.header("Tutor Lookup (Filters)")
-st.write("Lookup section reached ✅")
-st.write("tutor_long empty?:", tutor_long.empty)
-st.write("tutor_long rows:", len(tutor_long))
-
-
-st.write("Tutor-long rows loaded:", st.session_state.get("tutor_long_rows", 0))
 
 if tutor_long is None or len(tutor_long) == 0:
     st.info("Tutor-level lookup disabled: parsed_tutor_data.json not loaded.")
