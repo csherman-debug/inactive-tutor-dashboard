@@ -311,13 +311,22 @@ st.header("Coverage by Language")
 if tutor_long.empty:
     st.info("Language coverage requires parsed_tutor_data.json.")
 else:
-    lang_rows = tutor_long[["tutor_id", "languages"]].drop_duplicates()
-    exploded = lang_rows.explode("languages")
+    # Do NOT drop_duplicates before exploding (languages is a list -> unhashable).
+    exploded = tutor_long[["tutor_id", "languages"]].explode("languages")
     exploded["languages"] = exploded["languages"].fillna("").astype(str).str.strip()
     exploded = exploded[exploded["languages"].ne("")]
 
+    # Unique tutor-language pairs, then count unique tutors per language
+    exploded = exploded.drop_duplicates(subset=["tutor_id", "languages"])
     lang_counts = exploded.groupby("languages")["tutor_id"].nunique().sort_values(ascending=False)
-    top_n = st.slider("Show top N languages", min_value=5, max_value=50, value=min(20, len(lang_counts)), step=5)
+
+    top_n = st.slider(
+        "Show top N languages",
+        min_value=5,
+        max_value=50,
+        value=min(20, len(lang_counts)) if len(lang_counts) else 5,
+        step=5,
+    )
     st.bar_chart(lang_counts.head(top_n))
     st.caption("Y-axis = unique inactive tutors who report speaking the language.")
 
