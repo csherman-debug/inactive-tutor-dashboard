@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import json
+import os
+import io
+import matplotlib.pyplot as plt
 from pathlib import Path
 
 # -------------------------------------------------
@@ -9,7 +12,7 @@ from pathlib import Path
 st.set_page_config(page_title="Inactive Tutor Executive Dashboard", layout="wide")
 
 EXCEL_FILE = "Inactive_Tutor_Executive_Report_v7_FULL_FINAL.xlsx"
-JSON_FILE = "parsed_tutor_data.json"  # optional but enables tutor-level filtering
+JSON_FILE = "parsed_tutor_data.json"
 
 BAND_TO_GRADES = {
     "K-2nd": [0, 1, 2],
@@ -26,19 +29,13 @@ def expand_grade_band(band: str):
     if band is None:
         return []
     band = str(band).strip()
-
-    # NEW: handle values like "Math: Algebra 1"
     if ":" in band:
         band = band.split(":", 1)[1].strip()
-
     if band in BAND_TO_GRADES:
         return BAND_TO_GRADES[band]
-
     if band in HS_SPECIALTIES:
         return [9, 10, 11, 12]
-
     return []
-
 
 @st.cache_data
 def load_workbook(path: str):
@@ -47,281 +44,172 @@ def load_workbook(path: str):
 
 @st.cache_data
 def load_parsed_json(path: str):
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def build_tutor_long_from_json(tutors: list):
-    """Create a tutor-level long table from parsed_tutor_data.json for filtering."""
+def build_tutor_long_from_json(tutors: list) -> pd.DataFrame:
     rows = []
     for t in tutors:
         tutor_id = t.get("tutor_id")
         name = t.get("name")
+
         langs = t.get("languages", []) or []
         langs_norm = [str(x).strip() for x in langs if str(x).strip()]
         langs_join = ", ".join(sorted(set(langs_norm)))
 
-        # cert sets
         cert_subjects = set()
         for c in (t.get("certifications", []) or []) + (t.get("second_certifications", []) or []):
             subj = c.get("subject")
             if subj is None:
                 continue
             subj = str(subj).strip()
-            # Map Reading -> ELA as requested
             if subj.lower() == "reading":
                 subj = "ELA"
             cert_subjects.add(subj)
 
-        # grade bands = coverage
         for gb in t.get("grade_bands", []) or []:
             cov_subject = gb.get("subject")
             band_raw = gb.get("grade_band")
             band = str(band_raw).strip() if band_raw is not None else ""
-
-            # NEW: normalize "Math: Algebra 1" -> "Algebra 1"
             band_norm = band.split(":", 1)[1].strip() if ":" in band else band
 
             grades = expand_grade_band(band)
-            
-            specialty = None
-            if cov_subject == "Math" and band_norm not in BAND_TO_GRADES and band_norm:
-                specialty = band_norm
 
+            specialty = None
+            if cov_subject == "Math" and band_norm and band_norm not in BAND_TO_GRADES:
+                specialty = band_norm
 
             for g in grades:
                 rows.append({
                     "tutor_id": tutor_id,
                     "name": name,
                     "coverage_subject": cov_subject,
-                    "grade": g,
+                    "grade": int(g),
                     "math_specialty": specialty,
                     "languages": langs_norm,
                     "languages_str": langs_join,
+                    "cert_subjects": sorted(cert_subjects),
                     "has_ela_cert": ("ELA" in cert_subjects),
                     "has_math_cert": ("Math" in cert_subjects),
                     "has_sped_cert": ("SPED" in cert_subjects),
                     "has_spanish_cert": ("Spanish" in cert_subjects),
                     "has_ir_cert": ("IR" in cert_subjects),
-                    "cert_subjects": sorted(cert_subjects),
                 })
+
     df = pd.DataFrame(rows)
-    # Ensure list columns are safe
     if not df.empty:
         df["languages"] = df["languages"].apply(lambda x: x if isinstance(x, list) else [])
         df["cert_subjects"] = df["cert_subjects"].apply(lambda x: x if isinstance(x, list) else [])
     return df
 
+def safe_int(x):
+    try:
+        return int(x)
+    except Exception:
+        return 0
+
+def make_gap_heatmap(cov_matrix: pd.DataFrame, cert_matrix: pd.DataFrame, subject: str):
+    subject_col = cov_matrix.columns[0]
+    grade_cols = [c for c in cov_matrix.columns[1:]]
+
+    cov_row = cov_matrix.loc[cov_matrix[subject_col] == subject, grade_cols].iloc[0].fillna(0).apply(safe_int)
+    if subject in cert_matrix[subject_col].values:
+        cert_row = cert_matrix.loc[cert_matrix[subject_col] == subject, grade_cols].iloc[0].fillna(0).apply(safe_int)
+    else:
+        cert_row = pd.Series([0]*len(grade_cols), index=grade_cols)
+
+    gap = (cov_row - cert_row).clip(lower=0)
+
+    fig, ax = plt.subplots()
+    data = gap.values.reshape(1, -1)
+    im = ax.imshow(data, aspect="auto")
+
+    ax.set_yticks([0])
+    ax.set_yticklabels(["Gap"])
+    ax.set_xticks(range(len(grade_cols)))
+    ax.set_xticklabels([str(c) for c in grade_cols], rotation=0)
+
+    for j, val in enumerate(gap.values):
+        ax.text(j, 0, str(int(val)), ha="center", va="center")
+
+    ax.set_title(f"Certified Coverage Gap Heatmap — {subject}")
+    return fig
+
 # -------------------------------------------------
-# Sidebar
+# UI
 # -------------------------------------------------
 st.title("Inactive Tutor Executive Dashboard")
 
 st.sidebar.header("Data files")
 st.sidebar.write(f"• Excel expected: **{EXCEL_FILE}**")
-st.sidebar.write(f"• Optional JSON (enables tutor lookup & filters): **{JSON_FILE}**")
+st.sidebar.write(f"• JSON expected: **{JSON_FILE}**")
 
 excel_exists = Path(EXCEL_FILE).exists()
 json_exists = Path(JSON_FILE).exists()
-import os
 
-if json_exists:
-    # show file size
-    size_mb = os.path.getsize(JSON_FILE) / (1024 * 1024)
-
-    # show first line (this catches Git LFS pointers instantly)
-    with open(JSON_FILE, "r", encoding="utf-8", errors="replace") as f:
-        first_line = f.readline().strip()
-
-    # try parsing
-    try:
-        import json
-        with open(JSON_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        st.sidebar.error("JSON failed to load:")
-        st.sidebar.exception(e)
-
-
-if not excel_exists:
-    st.sidebar.warning("Excel workbook not found yet. Add it to this folder and redeploy/restart.")
-if not json_exists:
-    st.sidebar.info("If you also add parsed_tutor_data.json, you’ll get tutor-level filtering + tutor lists.")
-
-# Load workbook if present
 sheets = {}
 if excel_exists:
-    try:
-        sheets = load_workbook(EXCEL_FILE)
-    except Exception as e:
-        st.error(f"Error loading Excel workbook: {e}")
-        st.stop()
+    sheets = load_workbook(EXCEL_FILE)
+else:
+    st.warning("Excel workbook not found.")
 
-# Load JSON long table if present
 tutor_long = pd.DataFrame()
 if json_exists:
-    try:
-        tutors = load_parsed_json(JSON_FILE)
-        tutor_long = build_tutor_long_from_json(tutors)
-        st.session_state["tutor_long_rows"] = len(tutor_long)
+    tutors = load_parsed_json(JSON_FILE)
+    tutor_long = build_tutor_long_from_json(tutors)
 
-    except Exception as e:
-        st.warning(f"Could not load {JSON_FILE}: {e}")
+# Executive snapshot
+st.header("RFP Readiness Snapshot")
+if not tutor_long.empty:
+    st.metric("Inactive tutors (unique)", tutor_long["tutor_id"].nunique())
 
-# -------------------------------------------------
-# Executive charts (workbook-driven)
-# -------------------------------------------------
+# Coverage vs Certified
 if sheets and "Coverage Matrix" in sheets and "Certified Coverage Matrix" in sheets:
     st.header("Coverage vs Certified Coverage")
-
     cov = sheets["Coverage Matrix"]
     cert = sheets["Certified Coverage Matrix"]
 
     subject_col = cov.columns[0]
-    grade_cols = [c for c in cov.columns[1:]]
+    grade_cols = list(cov.columns[1:])
 
-    colA, colB = st.columns([1, 2])
-    with colA:
-        subject = st.selectbox("Subject", sorted(cov[subject_col].dropna().unique().tolist()))
-        grade = st.selectbox("Grade", grade_cols)
+    subject = st.selectbox("Subject", sorted(cov[subject_col].dropna().unique().tolist()))
+    grade = st.selectbox("Grade", grade_cols)
 
-    total = int(cov.loc[cov[subject_col] == subject, grade].fillna(0).iloc[0])
-    certified = 0
-    if subject in cert[subject_col].values:
-        certified = int(cert.loc[cert[subject_col] == subject, grade].fillna(0).iloc[0])
+    total = safe_int(cov.loc[cov[subject_col] == subject, grade].fillna(0).iloc[0])
+    certified = safe_int(cert.loc[cert[subject_col] == subject, grade].fillna(0).iloc[0]) if subject in cert[subject_col].values else 0
     gap = max(total - certified, 0)
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Total coverage", total)
-    m2.metric("Certified coverage", certified)
-    m3.metric("Gap", gap)
+    st.metric("Gap", gap)
 
-    # Chart by grade for selected subject
-    cov_row = cov.loc[cov[subject_col] == subject, grade_cols].iloc[0].fillna(0).astype(int)
-    cert_row = (
-        cert.loc[cert[subject_col] == subject, grade_cols].iloc[0].fillna(0).astype(int)
-        if subject in cert[subject_col].values else pd.Series([0]*len(grade_cols), index=grade_cols)
-    )
-    chart_df = pd.DataFrame({"Total": cov_row.values, "Certified": cert_row.values}, index=[str(x) for x in grade_cols])
-    st.bar_chart(chart_df)
+    fig = make_gap_heatmap(cov, cert, subject)
+    st.pyplot(fig, clear_figure=True)
 
-# Math Specialty Coverage
-import matplotlib.pyplot as plt
+# Tutor Lookup
+st.header("Tutor Lookup")
 
-ms = ms[[specialty_col, count_col]].dropna().sort_values(count_col, ascending=False)
-
-fig, ax = plt.subplots()
-ax.bar(ms[specialty_col].astype(str), ms[count_col])
-
-ax.set_ylabel("Inactive tutor count")
-ax.set_xlabel("Math specialty")
-ax.set_title("Math Specialty Coverage")
-
-ax.tick_params(axis="x", rotation=45)
-
-# Annotate values
-for i, v in enumerate(ms[count_col].tolist()):
-    ax.text(i, v, str(int(v)), ha="center", va="bottom")
-
-st.pyplot(fig, clear_figure=True)
-
-
-# Special Certification Flags
-if sheets and "Special Certification Flags" in sheets:
-    st.header("Special Certification Flags")
-    flags = sheets["Special Certification Flags"]
-    st.bar_chart(flags.set_index(flags.columns[0]))
-
-# State Certification Counts
-if sheets and "State Certification Counts" in sheets:
-    st.header("State Certification Counts")
-    states = sheets["State Certification Counts"].head(25)
-    st.bar_chart(states.set_index(states.columns[0]))
-
-# -------------------------------------------------
-# Tutor lookup & filters (JSON-driven)
-# -------------------------------------------------
-
-st.divider()
-st.header("Tutor Lookup (Filters)")
-
-if tutor_long is None or len(tutor_long) == 0:
-    st.info("Tutor-level lookup disabled: parsed_tutor_data.json not loaded.")
+if tutor_long.empty:
+    st.warning("Tutor lookup disabled.")
 else:
-    st.info("Tutor-level lookup enabled.")
-    # …rest of your filter UI…
+    search = st.sidebar.text_input("Search tutor name")
+    flt = tutor_long.copy()
+    if search:
+        flt = flt[flt["name"].str.contains(search, case=False, na=False)]
 
-# Filters
-with st.sidebar:
-    st.subheader("Filters")
+    tutors_df = flt.groupby(["tutor_id", "name"], as_index=False).agg(
+        subjects=("coverage_subject", lambda s: ", ".join(sorted(set(s)))),
+        grades=("grade", lambda g: ", ".join(map(str, sorted(set(g))))),
+        languages=("languages_str", "first"),
+        certs=("cert_subjects", lambda c: ", ".join(sorted(set(sum(c, []))))),
+    )
 
-    all_subjects = sorted([x for x in tutor_long["coverage_subject"].dropna().unique().tolist()])
-    f_subjects = st.multiselect("Coverage subject", all_subjects, default=all_subjects)
+    st.dataframe(tutors_df)
 
-    all_grades = sorted([int(x) for x in tutor_long["grade"].dropna().unique().tolist()])
-    f_grades = st.multiselect("Grade", all_grades, default=all_grades)
+    buffer = io.BytesIO()
+    tutors_df.to_excel(buffer, index=False, engine="openpyxl")
 
-    # Math specialty filter (only relevant when Math selected)
-    all_specs = sorted([x for x in tutor_long["math_specialty"].dropna().unique().tolist()])
-    f_specs = st.multiselect("Math specialty (optional)", all_specs, default=[])
-
-    # Language filter
-    # Build a flattened language list
-    lang_set = set()
-    for langs in tutor_long["languages"].tolist():
-        for l in (langs or []):
-            lang_set.add(str(l).strip())
-    all_langs = sorted([l for l in lang_set if l])
-    f_langs = st.multiselect("Language spoken (optional)", all_langs, default=[])
-
-    # Certification flags
-    require_ela = st.checkbox("Require ELA cert")
-    require_math = st.checkbox("Require Math cert")
-    require_sped = st.checkbox("Require SPED cert")
-    require_esl = st.checkbox("Require ESL cert (not in JSON)")  # placeholder
-    require_ir = st.checkbox("Require IR cert")
-    require_spanish = st.checkbox("Require Spanish cert")
-
-# Apply filters
-flt = tutor_long.copy()
-
-flt = flt[flt["coverage_subject"].isin(f_subjects)]
-flt = flt[flt["grade"].isin(f_grades)]
-
-if f_specs:
-    flt = flt[flt["math_specialty"].isin(f_specs)]
-
-if f_langs:
-    # Keep row if any selected language is in the tutor's language list
-    flt = flt[flt["languages"].apply(lambda ls: any(l in (ls or []) for l in f_langs))]
-
-if require_ela:
-    flt = flt[flt["has_ela_cert"] == True]
-if require_math:
-    flt = flt[flt["has_math_cert"] == True]
-if require_sped:
-    flt = flt[flt["has_sped_cert"] == True]
-if require_ir:
-    flt = flt[flt["has_ir_cert"] == True]
-if require_spanish:
-    flt = flt[flt["has_spanish_cert"] == True]
-
-# Aggregate to tutor list (unique tutors)
-tutors_df = (
-    flt.groupby(["tutor_id", "name"], as_index=False)
-       .agg(
-           subjects=("coverage_subject", lambda s: ", ".join(sorted(set(s)))),
-           grades=("grade", lambda g: ", ".join(map(str, sorted(set(map(int, g)))))),
-           specialties=("math_specialty", lambda s: ", ".join(sorted(set([x for x in s if pd.notna(x)])))),
-           languages=("languages_str", "first"),
-           certs=("cert_subjects", lambda c: ", ".join(sorted(set(sum(c, []))))),
-       )
-       .sort_values("name")
-)
-
-st.subheader("Results")
-st.write(f"Matching tutor-grade rows: **{len(flt):,}**")
-st.write(f"Unique tutors: **{len(tutors_df):,}**")
-
-st.dataframe(tutors_df, use_container_width=True, hide_index=True)
-
-st.caption("Tip: Add parsed_tutor_data.json to enable these filters. Excel-only deployments can still show executive charts.")
+    st.download_button(
+        label="Download filtered tutors",
+        data=buffer.getvalue(),
+        file_name="filtered_inactive_tutors.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
