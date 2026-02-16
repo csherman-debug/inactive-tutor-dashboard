@@ -107,6 +107,12 @@ st.sidebar.write(f"• Optional JSON (enables tutor lookup & filters): **{JSON_F
 
 excel_exists = Path(EXCEL_FILE).exists()
 json_exists = Path(JSON_FILE).exists()
+import os
+if not json_exists:
+    st.sidebar.error(f"Can't find {JSON_FILE}")
+    st.sidebar.write("Files in app directory:")
+    st.sidebar.write(os.listdir("."))
+
 
 if not excel_exists:
     st.sidebar.warning("Excel workbook not found yet. Add it to this folder and redeploy/restart.")
