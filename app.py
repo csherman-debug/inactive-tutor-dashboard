@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import altair as alt
 import json
 import io
 import re
@@ -162,6 +163,24 @@ def grade_label_to_int(label) -> int:
 def sort_grade_cols(cols):
     return sorted(cols, key=grade_label_to_int)
 
+def grade_int_to_label(g: int) -> str:
+    return "K" if int(g) == 0 else str(int(g))
+
+def grade_token_to_grades(token: str):
+    t = str(token).strip().upper()
+    if t == "ES":
+        return list(range(0, 6))  # K-5
+    if t == "MS":
+        return [6,7,8]
+    if t == "HS":
+        return [9,10,11,12]
+    if t in {"K", "KG"}:
+        return [0]
+    m = re.search(r"\d+", t)
+    if m:
+        return [int(m.group(0))]
+    return []
+
 def display_grade_label(label) -> str:
     g = grade_label_to_int(label)
     if g == 0:
@@ -229,7 +248,17 @@ with st.sidebar:
         f_subjects = st.multiselect("Coverage subject", subjects, default=subjects)
 
         grades = sorted([int(x) for x in tutor_long["grade"].dropna().unique().tolist()])
-        f_grades = st.multiselect("Grade", grades, default=grades)
+        # Grade filter supports ES/MS/HS + individual grades (K shown instead of 0)
+        grade_tokens = ["ES", "MS", "HS"] + [grade_int_to_label(g) for g in grades]
+        default_tokens = [grade_int_to_label(g) for g in grades]
+        selected_tokens = st.multiselect("Grade", grade_tokens, default=default_tokens)
+        # Expand tokens into grade integers
+        expanded = set()
+        for tok in selected_tokens:
+            for g in grade_token_to_grades(tok):
+                expanded.add(int(g))
+        f_grades = sorted(expanded)
+
 
         specs = sorted(tutor_long["math_specialty"].dropna().unique().tolist())
         f_specs = st.multiselect("Math specialty (optional)", specs, default=[])
@@ -293,12 +322,35 @@ if sheets and "Coverage Matrix" in sheets:
     show_cert = st.checkbox("Show certified coverage overlay", value=True)
 
     if view_mode == "Grades":
-        chart_df = pd.DataFrame({"Total Coverage": total_row.values}, index=[display_grade_label(g) for g in grade_cols])
+        grade_order = ["K"] + [str(i) for i in range(1, 13)]
+        df_plot = pd.DataFrame({
+            "Grade": [display_grade_label(g) for g in grade_cols],
+            "Total Coverage": total_row.values,
+        })
         if show_cert and cert is not None and subject in cert[subject_col].values:
             cert_row = cert.loc[cert[subject_col] == subject, grade_cols].iloc[0].fillna(0)
             cert_row = pd.to_numeric(cert_row, errors="coerce").fillna(0).astype(int)
-            chart_df["Certified Coverage"] = cert_row.values
-        st.bar_chart(chart_df)
+            df_plot["Certified Coverage"] = cert_row.values
+
+        # Force correct grade ordering (K,1,2,...,12) in the x-axis
+        df_plot["Grade"] = pd.Categorical(df_plot["Grade"], categories=grade_order, ordered=True)
+
+        value_cols = [c for c in df_plot.columns if c != "Grade"]
+        df_long = df_plot.melt(id_vars=["Grade"], value_vars=value_cols, var_name="Series", value_name="Count")
+
+        chart = (
+            alt.Chart(df_long)
+            .mark_bar()
+            .encode(
+                x=alt.X("Grade:N", sort=grade_order, title="Grade"),
+                y=alt.Y("Count:Q", title="Tutor count"),
+                color=alt.Color("Series:N", legend=alt.Legend(orient="top")),
+                xOffset="Series:N",
+                tooltip=["Grade:N", "Series:N", "Count:Q"],
+            )
+            .properties(height=360)
+        )
+        st.altair_chart(chart, use_container_width=True)
     else:
         total_band = make_grade_band_series(pd.Series(total_row.values, index=grade_cols))
         band_df = pd.DataFrame({"Total Coverage": total_band.values}, index=total_band.index)
