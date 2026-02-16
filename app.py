@@ -109,7 +109,8 @@ def build_tutor_rows(tutors: list[dict]) -> pd.DataFrame:
         tutor_id = t.get("tutor_id")
         name = t.get("name")
 
-        email = t.get(\"email\")
+        email = t.get("email")
+
 
         langs = t.get("languages", []) or []
         langs_norm = sorted({str(x).strip() for x in langs if str(x).strip()})
