@@ -233,7 +233,6 @@ st.header("Tutor Lookup (Filters)")
 if tutor_long is None or len(tutor_long) == 0:
     st.info("Tutor-level lookup disabled: parsed_tutor_data.json not loaded.")
 else:
-    st.success("Tutor-level lookup enabled.")
     # …rest of your filter UI…
 
 # Filters
