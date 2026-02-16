@@ -169,6 +169,8 @@ if json_exists:
     try:
         tutors = load_parsed_json(JSON_FILE)
         tutor_long = build_tutor_long_from_json(tutors)
+        st.sidebar.write("tutor_long_rows:", len(tutor_long))
+
     except Exception as e:
         st.warning(f"Could not load {JSON_FILE}: {e}")
 
