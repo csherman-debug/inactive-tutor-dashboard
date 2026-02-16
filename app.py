@@ -1,10 +1,20 @@
+
 import streamlit as st
 import pandas as pd
 import json
-import os
 import io
-import matplotlib.pyplot as plt
+import os
 from pathlib import Path
+
+# -------------------------------------------------
+# Optional plotting (heatmap). If matplotlib isn't available,
+# we gracefully skip the heatmap instead of crashing.
+# -------------------------------------------------
+try:
+    import matplotlib.pyplot as plt
+    HAS_MPL = True
+except Exception:
+    HAS_MPL = False
 
 # -------------------------------------------------
 # Config
@@ -22,8 +32,10 @@ BAND_TO_GRADES = {
 }
 
 HS_SPECIALTIES = {
-    "Algebra 1", "Algebra 2", "Geometry", "Calculus", "Statistics", "Trigonometry", "PSAT/ACT/SAT Prep"
+    "Algebra 1", "Algebra 2", "Geometry", "Calculus",
+    "Statistics", "Trigonometry", "PSAT/ACT/SAT Prep"
 }
+
 
 def expand_grade_band(band: str):
     if band is None:
@@ -31,21 +43,25 @@ def expand_grade_band(band: str):
     band = str(band).strip()
     if ":" in band:
         band = band.split(":", 1)[1].strip()
+
     if band in BAND_TO_GRADES:
         return BAND_TO_GRADES[band]
     if band in HS_SPECIALTIES:
         return [9, 10, 11, 12]
     return []
 
+
 @st.cache_data
 def load_workbook(path: str):
     xls = pd.ExcelFile(path)
     return {name: pd.read_excel(xls, name) for name in xls.sheet_names}
 
+
 @st.cache_data
 def load_parsed_json(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
 
 def build_tutor_long_from_json(tutors: list) -> pd.DataFrame:
     rows = []
@@ -102,15 +118,20 @@ def build_tutor_long_from_json(tutors: list) -> pd.DataFrame:
         df["cert_subjects"] = df["cert_subjects"].apply(lambda x: x if isinstance(x, list) else [])
     return df
 
+
 def safe_int(x):
     try:
         return int(x)
     except Exception:
         return 0
 
-def make_gap_heatmap(cov_matrix: pd.DataFrame, cert_matrix: pd.DataFrame, subject: str):
+
+def make_gap_heatmap(cov_matrix, cert_matrix, subject):
+    if not HAS_MPL:
+        return None
+
     subject_col = cov_matrix.columns[0]
-    grade_cols = [c for c in cov_matrix.columns[1:]]
+    grade_cols = cov_matrix.columns[1:]
 
     cov_row = cov_matrix.loc[cov_matrix[subject_col] == subject, grade_cols].iloc[0].fillna(0).apply(safe_int)
     if subject in cert_matrix[subject_col].values:
@@ -121,76 +142,65 @@ def make_gap_heatmap(cov_matrix: pd.DataFrame, cert_matrix: pd.DataFrame, subjec
     gap = (cov_row - cert_row).clip(lower=0)
 
     fig, ax = plt.subplots()
-    data = gap.values.reshape(1, -1)
-    im = ax.imshow(data, aspect="auto")
+    ax.imshow(gap.values.reshape(1, -1), aspect="auto")
 
     ax.set_yticks([0])
     ax.set_yticklabels(["Gap"])
     ax.set_xticks(range(len(grade_cols)))
-    ax.set_xticklabels([str(c) for c in grade_cols], rotation=0)
+    ax.set_xticklabels(grade_cols)
 
     for j, val in enumerate(gap.values):
         ax.text(j, 0, str(int(val)), ha="center", va="center")
 
-    ax.set_title(f"Certified Coverage Gap Heatmap — {subject}")
+    ax.set_title(f"Certified Coverage Gap — {subject}")
     return fig
 
+
 # -------------------------------------------------
-# UI
+# Load Data
 # -------------------------------------------------
 st.title("Inactive Tutor Executive Dashboard")
-
-st.sidebar.header("Data files")
-st.sidebar.write(f"• Excel expected: **{EXCEL_FILE}**")
-st.sidebar.write(f"• JSON expected: **{JSON_FILE}**")
 
 excel_exists = Path(EXCEL_FILE).exists()
 json_exists = Path(JSON_FILE).exists()
 
-sheets = {}
-if excel_exists:
-    sheets = load_workbook(EXCEL_FILE)
-else:
-    st.warning("Excel workbook not found.")
+sheets = load_workbook(EXCEL_FILE) if excel_exists else {}
+tutor_long = build_tutor_long_from_json(load_parsed_json(JSON_FILE)) if json_exists else pd.DataFrame()
 
-tutor_long = pd.DataFrame()
-if json_exists:
-    tutors = load_parsed_json(JSON_FILE)
-    tutor_long = build_tutor_long_from_json(tutors)
 
-# Executive snapshot
-st.header("RFP Readiness Snapshot")
-if not tutor_long.empty:
-    st.metric("Inactive tutors (unique)", tutor_long["tutor_id"].nunique())
+# -------------------------------------------------
+# Math Specialty Coverage (clean version)
+# -------------------------------------------------
+if sheets and "Math Specialty Coverage" in sheets:
+    st.header("Math Specialty Coverage")
 
-# Coverage vs Certified
-if sheets and "Coverage Matrix" in sheets and "Certified Coverage Matrix" in sheets:
-    st.header("Coverage vs Certified Coverage")
-    cov = sheets["Coverage Matrix"]
-    cert = sheets["Certified Coverage Matrix"]
+    ms = sheets["Math Specialty Coverage"].copy()
+    ms = ms.loc[:, ~ms.columns.astype(str).str.contains("^Unnamed")]
 
-    subject_col = cov.columns[0]
-    grade_cols = list(cov.columns[1:])
+    specialty_col = ms.columns[0]
+    numeric_cols = ms.select_dtypes(include="number").columns
 
-    subject = st.selectbox("Subject", sorted(cov[subject_col].dropna().unique().tolist()))
-    grade = st.selectbox("Grade", grade_cols)
+    if len(numeric_cols) > 0:
+        count_col = numeric_cols[0]
+        ms = ms[[specialty_col, count_col]].dropna()
+        ms[count_col] = ms[count_col].astype(int)
+        ms = ms.sort_values(count_col, ascending=False)
 
-    total = safe_int(cov.loc[cov[subject_col] == subject, grade].fillna(0).iloc[0])
-    certified = safe_int(cert.loc[cert[subject_col] == subject, grade].fillna(0).iloc[0]) if subject in cert[subject_col].values else 0
-    gap = max(total - certified, 0)
+        st.bar_chart(ms.set_index(specialty_col)[count_col])
+    else:
+        st.warning("No numeric count column found.")
 
-    st.metric("Gap", gap)
 
-    fig = make_gap_heatmap(cov, cert, subject)
-    st.pyplot(fig, clear_figure=True)
-
+# -------------------------------------------------
 # Tutor Lookup
+# -------------------------------------------------
 st.header("Tutor Lookup")
 
 if tutor_long.empty:
     st.warning("Tutor lookup disabled.")
 else:
     search = st.sidebar.text_input("Search tutor name")
+
     flt = tutor_long.copy()
     if search:
         flt = flt[flt["name"].str.contains(search, case=False, na=False)]
