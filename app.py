@@ -169,7 +169,7 @@ if json_exists:
     try:
         tutors = load_parsed_json(JSON_FILE)
         tutor_long = build_tutor_long_from_json(tutors)
-        st.sidebar.write("tutor_long_rows:", len(tutor_long))
+        st.session_state["tutor_long_rows"] = len(tutor_long)
 
     except Exception as e:
         st.warning(f"Could not load {JSON_FILE}: {e}")
@@ -233,15 +233,21 @@ if sheets and "State Certification Counts" in sheets:
 # -------------------------------------------------
 # Tutor lookup & filters (JSON-driven)
 # -------------------------------------------------
+
 st.divider()
 st.header("Tutor Lookup (Filters)")
+st.write("Lookup section reached ✅")
+st.write("tutor_long empty?:", tutor_long.empty)
+st.write("tutor_long rows:", len(tutor_long))
 
-if tutor_long.empty:
-    st.info(
-        "To enable tutor-level filtering and tutor lists, add **parsed_tutor_data.json** to this repo alongside app.py, "
-        "then redeploy. (We can also adapt this to a tutor-detail tab in Excel if you prefer.)"
-    )
-    st.stop()
+
+st.write("Tutor-long rows loaded:", st.session_state.get("tutor_long_rows", 0))
+
+if tutor_long is None or len(tutor_long) == 0:
+    st.info("Tutor-level lookup disabled: parsed_tutor_data.json not loaded.")
+else:
+    st.success("Tutor-level lookup enabled.")
+    # …rest of your filter UI…
 
 # Filters
 with st.sidebar:
