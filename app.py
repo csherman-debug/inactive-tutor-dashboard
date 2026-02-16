@@ -11,9 +11,6 @@ JSON_FILE  = "parsed_tutor_data.json"
 st.set_page_config(page_title="Inactive Tutor Dashboard", layout="wide")
 st.title("Inactive Tutor Dashboard (Inactive Pool)")
 
-# -----------------------------
-# Helpers
-# -----------------------------
 @st.cache_data
 def load_sheets(xlsx_path: str) -> dict[str, pd.DataFrame]:
     xls = pd.ExcelFile(xlsx_path)
@@ -24,35 +21,62 @@ def load_json(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
+def make_unique_columns(cols):
+    """Return list of unique column names by suffixing duplicates."""
+    seen = {}
+    out = []
+    for c in cols:
+        name = str(c)
+        if name not in seen:
+            seen[name] = 0
+            out.append(name)
+        else:
+            seen[name] += 1
+            out.append(f"{name}.{seen[name]}")
+    return out
+
 def clean_excel_df(df: pd.DataFrame) -> pd.DataFrame:
+    # Drop typical Excel artifact columns (Unnamed: 0, etc.)
     df = df.loc[:, ~df.columns.astype(str).str.contains(r"^Unnamed", case=False, regex=True)]
-    df = df.loc[:, ~df.columns.duplicated()]
+    # Ensure truly unique column labels (important for sort_values)
+    df.columns = make_unique_columns(df.columns)
     return df
 
 def pick_label_and_count_columns(df: pd.DataFrame):
+    """Pick a label (category) column and a count column robustly."""
     df = df.copy()
+    df.columns = make_unique_columns(df.columns)
+
+    # Prefer first non-numeric column as label, but avoid 'index' if present
     label_col = None
     for c in df.columns:
+        if str(c).lower().startswith("index"):
+            continue
         if not pd.api.types.is_numeric_dtype(df[c]):
             label_col = c
             break
     if label_col is None:
         label_col = df.columns[0]
 
+    # Prefer a known count name, otherwise last numeric column (avoid index columns)
     preferred = ["Inactive Tutor Count", "Tutor Count", "Count"]
-    cols_str = [str(c) for c in df.columns]
     count_col = None
+    cols_lower = {str(c).lower(): c for c in df.columns}
     for name in preferred:
-        if name in cols_str:
-            count_col = name
+        if name.lower() in cols_lower:
+            count_col = cols_lower[name.lower()]
             break
+
     if count_col is None:
-        numeric_cols = df.select_dtypes(include="number").columns.tolist()
+        numeric_cols = [c for c in df.select_dtypes(include="number").columns.tolist() if not str(c).lower().startswith("index")]
         if numeric_cols:
             count_col = numeric_cols[-1]
         else:
-            count_col = df.columns[-1]
+            # Try coercing last non-index column
+            non_index = [c for c in df.columns if not str(c).lower().startswith("index")]
+            count_col = non_index[-1] if non_index else df.columns[-1]
             df[count_col] = pd.to_numeric(df[count_col], errors="coerce")
+
     return label_col, count_col, df
 
 def normalize_cert_subject(subj: str) -> str:
@@ -63,7 +87,6 @@ def normalize_cert_subject(subj: str) -> str:
         return "ELA"
     return s
 
-# Grade-band expansion (for tutor-level coverage rows)
 BAND_TO_GRADES = {"K-2nd":[0,1,2], "3rd-5th":[3,4,5], "6th-8th":[6,7,8], "9th-12th":[9,10,11,12]}
 HS_SPECIALTIES = {"Algebra 1","Algebra 2","Geometry","Calculus","Statistics","Trigonometry","PSAT/ACT/SAT Prep"}
 
@@ -129,22 +152,17 @@ def build_tutor_rows(tutors: list[dict]) -> pd.DataFrame:
 
 def grade_label_to_int(label) -> int:
     s = str(label).strip().upper()
-    # Handle K / KG / KINDER
     if s in {"K", "KG", "KINDER", "KINDERGARTEN"}:
         return 0
-    # Extract first integer found
     m = re.search(r"\d+", s)
     if m:
         return int(m.group(0))
-    # Fall back: push unknowns to end
     return 999
 
 def sort_grade_cols(cols):
-    # returns cols sorted by numeric grade, but preserves original labels
     return sorted(cols, key=grade_label_to_int)
 
 def make_grade_band_series(series_by_grade_label: pd.Series) -> pd.Series:
-    # series index are grade labels; convert to int then band
     items = []
     for lbl, val in series_by_grade_label.items():
         g = grade_label_to_int(lbl)
@@ -157,7 +175,6 @@ def make_grade_band_series(series_by_grade_label: pd.Series) -> pd.Series:
         return "Other"
     df["band"] = df["grade"].apply(band)
     out = df.groupby("band")["value"].sum()
-    # order bands
     order = ["K-5","6-8","9-12","Other"]
     out = out.reindex([b for b in order if b in out.index])
     return out
@@ -239,14 +256,13 @@ else:
     c3.metric("ELA/Lit coverage (unique)", "—")
     c4.metric("SPED certified (unique)", "—")
 
-# Special Certification Flags (hide index)
 if sheets and "Special Certification Flags" in sheets:
     st.subheader("Special Certification Flags")
     flags = clean_excel_df(sheets["Special Certification Flags"])
     st.dataframe(flags, use_container_width=True, hide_index=True)
 
 # -----------------------------
-# Coverage by grade level (no gap) + grade band toggle + correct grade order
+# Coverage by grade level
 # -----------------------------
 st.header("Coverage by Grade Level")
 
@@ -259,7 +275,6 @@ if sheets and "Coverage Matrix" in sheets:
     grade_cols = sort_grade_cols(grade_cols_raw)
 
     subject = st.selectbox("Select subject area", sorted(cov[subject_col].dropna().unique().tolist()))
-
     view_mode = st.radio("View", ["Grades", "Grade bands (K-5 / 6-8 / 9-12)"], horizontal=True, index=0)
 
     total_row = cov.loc[cov[subject_col] == subject, grade_cols].iloc[0].fillna(0)
@@ -269,24 +284,19 @@ if sheets and "Coverage Matrix" in sheets:
 
     if view_mode == "Grades":
         chart_df = pd.DataFrame({"Total Coverage": total_row.values}, index=[str(g) for g in grade_cols])
-
         if show_cert and cert is not None and subject in cert[subject_col].values:
             cert_row = cert.loc[cert[subject_col] == subject, grade_cols].iloc[0].fillna(0)
             cert_row = pd.to_numeric(cert_row, errors="coerce").fillna(0).astype(int)
             chart_df["Certified Coverage"] = cert_row.values
-
         st.bar_chart(chart_df)
-
     else:
         total_band = make_grade_band_series(pd.Series(total_row.values, index=grade_cols))
         band_df = pd.DataFrame({"Total Coverage": total_band.values}, index=total_band.index)
-
         if show_cert and cert is not None and subject in cert[subject_col].values:
             cert_row = cert.loc[cert[subject_col] == subject, grade_cols].iloc[0].fillna(0)
             cert_row = pd.to_numeric(cert_row, errors="coerce").fillna(0).astype(int)
             cert_band = make_grade_band_series(pd.Series(cert_row.values, index=grade_cols))
             band_df["Certified Coverage"] = cert_band.values
-
         st.bar_chart(band_df)
 
     st.caption("Counts are unique inactive tutors from the executive workbook matrices.")
@@ -294,35 +304,30 @@ else:
     st.info("Coverage Matrix sheet not found in the workbook.")
 
 # -----------------------------
-# Coverage by language (JSON-driven)
+# Coverage by language
 # -----------------------------
 st.header("Coverage by Language")
 
 if tutor_long.empty:
     st.info("Language coverage requires parsed_tutor_data.json.")
 else:
-    # unique tutors by language
     lang_rows = tutor_long[["tutor_id", "languages"]].drop_duplicates()
     exploded = lang_rows.explode("languages")
     exploded["languages"] = exploded["languages"].fillna("").astype(str).str.strip()
     exploded = exploded[exploded["languages"].ne("")]
 
     lang_counts = exploded.groupby("languages")["tutor_id"].nunique().sort_values(ascending=False)
-
     top_n = st.slider("Show top N languages", min_value=5, max_value=50, value=min(20, len(lang_counts)), step=5)
-    lang_counts_top = lang_counts.head(top_n)
-
-    st.bar_chart(lang_counts_top)
+    st.bar_chart(lang_counts.head(top_n))
     st.caption("Y-axis = unique inactive tutors who report speaking the language.")
 
 # -----------------------------
-# Math Specialty Coverage (Excel-driven) + drill-down (JSON)
+# Math Specialty Coverage + drill-down
 # -----------------------------
 st.header("Math Specialty Coverage")
 
 if sheets and "Math Specialty Coverage" in sheets:
     ms_raw = clean_excel_df(sheets["Math Specialty Coverage"])
-
     if ms_raw.shape[1] < 2:
         st.warning("Math Specialty Coverage sheet doesn't have at least 2 columns.")
     else:
@@ -340,14 +345,12 @@ if sheets and "Math Specialty Coverage" in sheets:
         st.bar_chart(plot_df.set_index(label_col)[count_col])
         st.caption("X-axis: math specialty label. Y-axis: unique inactive tutor counts.")
 
-        # Drill-down
         if not tutor_long.empty:
             st.subheader("Math Specialty Drill-down")
             specialty = st.selectbox("Select a math specialty to view tutors", plot_df[label_col].tolist())
 
             mflt = tutor_long[(tutor_long["coverage_subject"] == "Math") & (tutor_long["math_specialty"] == specialty)].copy()
 
-            # Apply same sidebar filters (grade, language, certs) to drill-down list
             if f_grades:
                 mflt = mflt[mflt["grade"].isin(f_grades)]
             if f_langs:
@@ -380,19 +383,20 @@ if sheets and "Math Specialty Coverage" in sheets:
 
             st.dataframe(tutors_df, use_container_width=True, hide_index=True)
 
+            specialty_safe = re.sub(r"[^A-Za-z0-9]+", "_", str(specialty)).strip("_").lower() or "specialty"
             out = io.BytesIO()
             tutors_df.to_excel(out, index=False, engine="openpyxl")
             st.download_button(
                 "Download this specialty list (Excel)",
                 data=out.getvalue(),
-                file_name=f"math_specialty_{re.sub(r'[^A-Za-z0-9]+','_', specialty).lower()}.xlsx",
+                file_name=f"math_specialty_{specialty_safe}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
 else:
     st.info("Math Specialty Coverage sheet not found in the workbook.")
 
 # -----------------------------
-# Tutor lookup (JSON-driven) + export
+# Tutor lookup + export
 # -----------------------------
 st.header("Tutor Lookup")
 
@@ -401,9 +405,10 @@ if tutor_long.empty:
 else:
     flt = tutor_long.copy()
 
-    # Apply sidebar filters
-    flt = flt[flt["coverage_subject"].isin(f_subjects)]
-    flt = flt[flt["grade"].isin(f_grades)]
+    if f_subjects:
+        flt = flt[flt["coverage_subject"].isin(f_subjects)]
+    if f_grades:
+        flt = flt[flt["grade"].isin(f_grades)]
 
     if f_specs:
         flt = flt[flt["math_specialty"].isin(f_specs)]
