@@ -535,7 +535,7 @@ with tab_lookup:
     if tutor_long.empty:
         st.info("Tutor lookup is disabled until parsed_tutor_data.json is present and readable.")
     else:
-                # Build filter options
+        # Build filter options
         subjects_all, grade_tokens_all, default_tokens, specs_all, langs_all = get_lookup_filter_options(tutor_long)
 
         # Filters (apply only to this tab)
