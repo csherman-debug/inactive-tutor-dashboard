@@ -10,7 +10,7 @@ EXCEL_FILE = "Inactive_Tutor_Executive_Report_v7_FULL_FINAL.xlsx"
 JSON_FILE  = "parsed_tutor_data.json"
 
 st.set_page_config(page_title="Tutor Dashboard - Summaries & Lookup", layout="wide")
-st.title("Inactive Tutor Dashboard (Inactive Pool)")
+st.title("Tutor Dashboard - Summaries & Lookup (Inactive Pool)")
 
 @st.cache_data
 def load_sheets(xlsx_path: str) -> dict[str, pd.DataFrame]:
