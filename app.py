@@ -224,6 +224,53 @@ def make_grade_band_series(series_by_grade_label: pd.Series) -> pd.Series:
     out = out.reindex([b for b in order if b in out.index])
     return out
 
+
+def _bar_with_value_labels(df: pd.DataFrame, x: str, y: str, *, color: str | None = None, sort=None, height: int = 320, title: str | None = None):
+    """Altair bar chart with numeric labels above bars."""
+    enc = {
+        "x": alt.X(f"{x}:N", sort=sort, title=title or x),
+        "y": alt.Y(f"{y}:Q", title=y),
+        "tooltip": [alt.Tooltip(f"{x}:N"), alt.Tooltip(f"{y}:Q")],
+    }
+    if color:
+        enc["color"] = alt.Color(f"{color}:N", legend=alt.Legend(orient="top"))
+        enc["tooltip"].insert(1, alt.Tooltip(f"{color}:N"))
+
+    base = alt.Chart(df)
+    bars = base.mark_bar().encode(**enc)
+    text = base.mark_text(dy=-6, color="white").encode(
+        x=enc["x"],
+        y=enc["y"],
+        text=alt.Text(f"{y}:Q", format=",.0f"),
+    )
+    if color:
+        text = text.encode(color=alt.value("white"))
+    return (bars + text).properties(height=height)
+
+def _grouped_bar_with_labels(df_long: pd.DataFrame, x: str, y: str, group: str, *, sort=None, height: int = 320, x_title: str | None = None, y_title: str | None = None):
+    """Altair grouped bar chart (xOffset) with labels."""
+    base = alt.Chart(df_long)
+    bars = (
+        base.mark_bar()
+        .encode(
+            x=alt.X(f"{x}:N", sort=sort, title=x_title or x),
+            y=alt.Y(f"{y}:Q", title=y_title or y),
+            color=alt.Color(f"{group}:N", legend=alt.Legend(orient="top")),
+            xOffset=f"{group}:N",
+            tooltip=[f"{x}:N", f"{group}:N", f"{y}:Q"],
+        )
+    )
+    text = (
+        base.mark_text(dy=-6, color="white")
+        .encode(
+            x=alt.X(f"{x}:N", sort=sort),
+            y=alt.Y(f"{y}:Q"),
+            xOffset=f"{group}:N",
+            text=alt.Text(f"{y}:Q", format=",.0f"),
+        )
+    )
+    return (bars + text).properties(height=height)
+
 # -----------------------------
 # Load sources
 # -----------------------------
@@ -426,17 +473,16 @@ with tab_overview:
             value_cols = [c for c in df_plot.columns if c != "Grade"]
             df_long = df_plot.melt(id_vars=["Grade"], value_vars=value_cols, var_name="Series", value_name="Count")
 
-            chart = (
-                alt.Chart(df_long)
-                .mark_bar()
-                .encode(
-                    x=alt.X("Grade:N", sort=grade_order, title="Grade"),
-                    y=alt.Y("Count:Q", title="Tutor count"),
-                    color=alt.Color("Series:N", legend=alt.Legend(orient="top")),
-                    xOffset="Series:N",
-                    tooltip=["Grade:N", "Series:N", "Count:Q"],
-                )
-                .properties(height=360)
+
+            chart = _grouped_bar_with_labels(
+                df_long,
+                x="Grade",
+                y="Count",
+                group="Series",
+                sort=grade_order,
+                height=360,
+                x_title="Grade",
+                y_title="Tutor count",
             )
             st.altair_chart(chart, use_container_width=True)
         else:
@@ -447,7 +493,10 @@ with tab_overview:
                 cert_row = pd.to_numeric(cert_row, errors="coerce").fillna(0).astype(int)
                 cert_band = make_grade_band_series(pd.Series(cert_row.values, index=grade_cols))
                 band_df["Certified Coverage"] = cert_band.values
-            st.bar_chart(band_df)
+            band_plot = band_df.reset_index().rename(columns={"index": "Band"})
+            band_long = band_plot.melt(id_vars=["Band"], var_name="Series", value_name="Count")
+            chart_band = _grouped_bar_with_labels(band_long, x="Band", y="Count", group="Series", sort=["K-5","6-8","9-12","Other"], height=320, x_title="Grade band", y_title="Tutor count")
+            st.altair_chart(chart_band, use_container_width=True)
 
         st.caption("Individual grades show unique tutors. Grade bands are culumlative and will include overlap (e.g. a tutor that is certified in K-5 will be represented five times in that grade band).")
     else:
@@ -476,7 +525,8 @@ with tab_overview:
                 .sort_values(count_col, ascending=False)
             )
 
-            st.bar_chart(plot_df.set_index(label_col)[count_col])
+            chart_ms = _bar_with_value_labels(plot_df, x=label_col, y=count_col, sort=plot_df[label_col].tolist(), height=320, title="Math specialty")
+            st.altair_chart(chart_ms, use_container_width=True)
             st.caption("X-axis: Math specialty. Y-axis: Unique tutor count")
 
     else:
@@ -508,7 +558,10 @@ with tab_overview:
             value=min(20, len(lang_counts)) if len(lang_counts) else 5,
             step=5,
         )
-        st.bar_chart(lang_counts.head(top_n))
+        lang_df = lang_counts.head(top_n).reset_index()
+        lang_df.columns = ["Language", "Tutors"]
+        chart_lang = _bar_with_value_labels(lang_df, x="Language", y="Tutors", sort=lang_df["Language"].tolist(), height=320, title="Language")
+        st.altair_chart(chart_lang, use_container_width=True)
         st.caption("Y-axis = Unique tutors who report speaking the language.")
 
     # -----------------------------
@@ -518,10 +571,40 @@ with tab_overview:
     if sheets and "Special Certification Flags" in sheets:
         st.divider()
         st.subheader("Special Certification Flags")
-        flags = clean_excel_df(sheets["Special Certification Flags"])
+        flags_raw = clean_excel_df(sheets["Special Certification Flags"])
         # Drop any real "index" columns that may exist in the sheet
-        flags = flags.loc[:, ~flags.columns.astype(str).str.match(r"(?i)^index(\.|$)")]
-        st.dataframe(flags, use_container_width=True, hide_index=True)
+        flags_raw = flags_raw.loc[:, ~flags_raw.columns.astype(str).str.match(r"(?i)^index(\.|$)")]
+        if flags_raw.shape[1] < 2:
+            st.dataframe(flags_raw, use_container_width=True, hide_index=True)
+        else:
+            label_col, count_col, flags = pick_label_and_count_columns(flags_raw)
+            flags[label_col] = flags[label_col].astype(str).str.strip()
+            flags[count_col] = pd.to_numeric(flags[count_col], errors="coerce").fillna(0).astype(int)
+            plot_df = (
+                flags[[label_col, count_col]]
+                .groupby(label_col, as_index=False)[count_col].sum()
+                .sort_values(count_col, ascending=False)
+            )
+            # Keep chart readable: top 10 + "Other"
+            top_k = 10
+            if len(plot_df) > top_k:
+                top = plot_df.head(top_k).copy()
+                other_sum = int(plot_df.iloc[top_k:][count_col].sum())
+                other = pd.DataFrame([{label_col: "Other", count_col: other_sum}])
+                plot_df = pd.concat([top, other], ignore_index=True)
+
+            pie = (
+                alt.Chart(plot_df)
+                .mark_arc()
+                .encode(
+                    theta=alt.Theta(f"{count_col}:Q", title="Tutors"),
+                    color=alt.Color(f"{label_col}:N", legend=alt.Legend(orient="right")),
+                    tooltip=[alt.Tooltip(f"{label_col}:N", title="Flag"), alt.Tooltip(f"{count_col}:Q", title="Tutors")],
+                )
+                .properties(height=360)
+            )
+            st.altair_chart(pie, use_container_width=True)
+            st.caption("Pie shows unique inactive tutor counts by flag (top 10 + Other).")
     else:
         st.divider()
         st.subheader("Special Certification Flags not found in the workbook")
@@ -542,6 +625,9 @@ with tab_lookup:
         st.markdown('<div class="filter-card">', unsafe_allow_html=True)
         st.subheader("Filters", anchor=False)
 
+        export_slot = None
+
+
         cA, cB, cC, cD = st.columns([1.2, 1.2, 1.0, 0.6])
         with cD:
             if st.button("Reset", use_container_width=True):
@@ -553,6 +639,9 @@ with tab_lookup:
                 ]:
                     st.session_state.pop(k, None)
                 st.rerun()
+
+            export_slot = st.empty()
+
 
         with cA:
             search = st.text_input(
@@ -672,13 +761,22 @@ with tab_lookup:
         display_df = tutors_df.drop(columns=["tutor_id"], errors="ignore")
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-        st.subheader("Export")
+        # Export button lives in the Filters panel (top-right) for visibility.
         out = io.BytesIO()
         tutors_df.to_excel(out, index=False, engine="openpyxl")
-        st.download_button(
-            "Download filtered tutors (Excel)",
-            data=out.getvalue(),
-            file_name="filtered_inactive_tutors.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
+        if export_slot is not None:
+            export_slot.download_button(
+                "Download (Excel)",
+                data=out.getvalue(),
+                file_name="filtered_inactive_tutors.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        else:
+            st.download_button(
+                "Download filtered tutors (Excel)",
+                data=out.getvalue(),
+                file_name="filtered_inactive_tutors.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
