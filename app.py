@@ -516,7 +516,7 @@ with tab_overview:
         st.info("Coverage Matrix sheet not found in the workbook.")
 
     # -----------------------------
-    # Math Specialty Coverage 
+    # Coverage by Language 
     # -----------------------------
 
     st.divider()
@@ -548,7 +548,8 @@ with tab_overview:
         st.caption("Y-axis = Unique tutors who report speaking the language.")
 
     # -----------------------------
-    # Special Certification Flags
+    # Coverage by Math Specialization
+    # -----------------------------
     st.divider()
     st.subheader("Math Specialty Coverage")
 
@@ -576,9 +577,7 @@ with tab_overview:
         st.info("Math Specialty Coverage sheet not found in the workbook.")
     
     # -----------------------------
-    # Coverage by language
-    # -----------------------------
-
+    # Coverage by Special Certifications
     # -----------------------------
 
     if sheets and "Special Certification Flags" in sheets:
@@ -605,22 +604,19 @@ with tab_overview:
                 other_sum = int(plot_df.iloc[top_k:][count_col].sum())
                 other = pd.DataFrame([{label_col: "Other", count_col: other_sum}])
                 plot_df = pd.concat([top, other], ignore_index=True)
-            base = alt.Chart(plot_df).encode(
-                theta=alt.Theta(f"{count_col}:Q"),
-                color=alt.Color(f"{label_col}:N", legend=alt.Legend(orient="right")),
-                tooltip=[
-                    alt.Tooltip(f"{label_col}:N", title="Flag"),
-                    alt.Tooltip(f"{count_col}:Q", title="Tutors"),
-                ],
+            
+            chart_flags = _bar_with_value_labels(
+                plot_df,
+                x=label_col,
+                y=count_col,
+                sort=plot_df[label_col].tolist(),
+                height=380,
+                title="Special Certification Flag"
             )
+            
+            st.altair_chart(chart_flags, use_container_width=True)
+            st.caption("Unique inactive tutor counts by special certification flag (top 10 + Other).")
 
-            arcs = base.mark_arc()
-            labels = base.mark_text(radius=90).encode(
-                text=alt.Text(f"{count_col}:Q", format=",.0f")
-            )
-
-            st.altair_chart(arcs + labels, use_container_width=True)
-            st.caption("Pie shows unique inactive tutor counts by flag (top 10 + Other).")
     else:
         st.divider()
         st.subheader("Special Certification Flags not found in the workbook")
