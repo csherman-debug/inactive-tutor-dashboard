@@ -766,6 +766,7 @@ with tab_lookup:
             .sort_values("name")
         )
 
+        st.divider()
         st.subheader("Results")
         st.write(f"Matching tutor-grade rows: **{len(flt):,}**")
         st.write(f"Unique tutors: **{len(tutors_df):,}**")
