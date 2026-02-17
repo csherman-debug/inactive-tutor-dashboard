@@ -386,7 +386,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 # -----------------------------
 # Tabs
 # -----------------------------
-tab_overview, tab_math, tab_lookup = st.tabs(["Coverage Overview", "Math Specializations", "Tutor Filter & Lookup"])
+tab_overview, tab_lookup = st.tabs(["Coverage Overview", "Tutor Filter & Lookup"])
 
 with tab_overview:
     # -----------------------------
@@ -455,8 +455,34 @@ with tab_overview:
     else:
         st.info("Coverage Matrix sheet not found in the workbook.")
 
+    # -----------------------------
+    # Math Specialty Coverage 
+    # -----------------------------
 
+    st.subheader("Math Specialty Coverage")
 
+    if sheets and "Math Specialty Coverage" in sheets:
+        ms_raw = clean_excel_df(sheets["Math Specialty Coverage"])
+        if ms_raw.shape[1] < 2:
+            st.warning("Math Specialty Coverage sheet doesn't have at least 2 columns.")
+        else:
+            label_col, count_col, ms = pick_label_and_count_columns(ms_raw)
+            ms[count_col] = pd.to_numeric(ms[count_col], errors="coerce").fillna(0).astype(int)
+            ms[label_col] = ms[label_col].astype(str).str.strip()
+            ms = ms[ms[label_col].ne("")]
+
+            plot_df = (
+                ms[[label_col, count_col]]
+                .groupby(label_col, as_index=False)[count_col].sum()
+                .sort_values(count_col, ascending=False)
+            )
+
+            st.bar_chart(plot_df.set_index(label_col)[count_col])
+            st.caption("X-axis: math specialty label. Y-axis: unique inactive tutor counts.")
+
+    else:
+        st.info("Math Specialty Coverage sheet not found in the workbook.")
+    
     # -----------------------------
     # Coverage by language
     # -----------------------------
@@ -485,7 +511,6 @@ with tab_overview:
         st.bar_chart(lang_counts.head(top_n))
         st.caption("Y-axis = unique inactive tutors who report speaking the language.")
 
-#with tab_certs:
     # -----------------------------
     # Special Certification Flags
     # -----------------------------
@@ -496,73 +521,6 @@ with tab_overview:
         # Drop any real "index" columns that may exist in the sheet
         flags = flags.loc[:, ~flags.columns.astype(str).str.match(r"(?i)^index(\.|$)")]
         st.dataframe(flags, use_container_width=True, hide_index=True)
-
-
-with tab_math:
-    # -----------------------------
-    # Math Specialty Coverage + drill-down
-    # -----------------------------
-
-    st.subheader("Math Specialty Coverage")
-
-    if sheets and "Math Specialty Coverage" in sheets:
-        ms_raw = clean_excel_df(sheets["Math Specialty Coverage"])
-        if ms_raw.shape[1] < 2:
-            st.warning("Math Specialty Coverage sheet doesn't have at least 2 columns.")
-        else:
-            label_col, count_col, ms = pick_label_and_count_columns(ms_raw)
-            ms[count_col] = pd.to_numeric(ms[count_col], errors="coerce").fillna(0).astype(int)
-            ms[label_col] = ms[label_col].astype(str).str.strip()
-            ms = ms[ms[label_col].ne("")]
-
-            plot_df = (
-                ms[[label_col, count_col]]
-                .groupby(label_col, as_index=False)[count_col].sum()
-                .sort_values(count_col, ascending=False)
-            )
-
-            st.bar_chart(plot_df.set_index(label_col)[count_col])
-            st.caption("X-axis: math specialty label. Y-axis: unique inactive tutor counts.")
-
-            if not tutor_long.empty:
-                st.subheader("Math Specialty Filter")
-                specialty = st.selectbox("Select a math specialty to view tutors", plot_df[label_col].tolist())
-
-                mflt = tutor_long[(tutor_long["coverage_subject"] == "Math") & (tutor_long["math_specialty"] == specialty)].copy()
-
-                st.write(f"Matching tutor-grade rows: **{len(mflt):,}**")
-                st.write(f"Unique tutors: **{mflt['tutor_id'].nunique():,}**")
-
-                # Build display/export table for drill-down (one row per tutor)
-                agg_map = {
-                    "grades": ("grade", lambda g: ", ".join(map(str, sorted(set(map(int, g)))))),
-                    "languages": ("languages_str", "first"),
-                    "certs": ("cert_subjects", lambda c: ", ".join(sorted(set(sum(c, []))))),
-                }
-                if "email" in mflt.columns:
-                    agg_map["email"] = ("email", "first")
-            
-                tutors_df = (
-                    mflt.groupby(["tutor_id", "name"], as_index=False)
-                    .agg(**agg_map)
-                    .sort_values("name")
-                )
-            
-                # Render (hide tutor_id), but keep it in tutors_df for export
-                display_df = tutors_df.drop(columns=["tutor_id"], errors="ignore")
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
-            
-                specialty_safe = re.sub(r"[^A-Za-z0-9]+", "_", str(specialty)).strip("_").lower() or "specialty"
-                out = io.BytesIO()
-                tutors_df.to_excel(out, index=False, engine="openpyxl")
-                st.download_button(
-                    "Download this specialty list (Excel)",
-                    data=out.getvalue(),
-                    file_name=f"math_specialty_{specialty_safe}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
-    else:
-        st.info("Math Specialty Coverage sheet not found in the workbook.")
 
 with tab_lookup:
     # -----------------------------
