@@ -380,8 +380,6 @@ m1.metric("Total inactive tutors", f"{total_unique:,}" if total_unique else "—
 m2.metric("Math coverage", f"{total_math:,}" if total_unique else "—")
 m3.metric("ELA/Lit coverage", f"{total_ela:,}" if total_unique else "—")
 m4.metric("SPED certified", f"{total_sped:,}" if total_unique else "—")
-st.markdown('<div class="muted">Filters apply in the <b>Tutor Lookup</b> tab.</div>', unsafe_allow_html=True)
-st.markdown("</div>", unsafe_allow_html=True)
 
 # -----------------------------
 # Tabs
@@ -451,7 +449,7 @@ with tab_overview:
                 band_df["Certified Coverage"] = cert_band.values
             st.bar_chart(band_df)
 
-        st.caption("Counts are unique inactive tutors from the executive workbook matrices.")
+        st.caption("Individual grades show unique tutors. Grade bands are culumlative and will include overlap (e.g. a tutor that is certified in K-5 will be represented five times in that grade band.")
     else:
         st.info("Coverage Matrix sheet not found in the workbook.")
 
@@ -459,6 +457,7 @@ with tab_overview:
     # Math Specialty Coverage 
     # -----------------------------
 
+    st.divider()
     st.subheader("Math Specialty Coverage")
 
     if sheets and "Math Specialty Coverage" in sheets:
@@ -478,7 +477,7 @@ with tab_overview:
             )
 
             st.bar_chart(plot_df.set_index(label_col)[count_col])
-            st.caption("X-axis: math specialty label. Y-axis: unique inactive tutor counts.")
+            st.caption("X-axis: Math specialty. Y-axis: Unique tutor count")
 
     else:
         st.info("Math Specialty Coverage sheet not found in the workbook.")
@@ -487,6 +486,7 @@ with tab_overview:
     # Coverage by language
     # -----------------------------
 
+    st.divider()
     st.subheader("Coverage by Language")
 
     if tutor_long.empty:
@@ -516,11 +516,15 @@ with tab_overview:
     # -----------------------------
 
     if sheets and "Special Certification Flags" in sheets:
+        st.divider()
         st.subheader("Special Certification Flags")
         flags = clean_excel_df(sheets["Special Certification Flags"])
         # Drop any real "index" columns that may exist in the sheet
         flags = flags.loc[:, ~flags.columns.astype(str).str.match(r"(?i)^index(\.|$)")]
         st.dataframe(flags, use_container_width=True, hide_index=True)
+    else:
+        st.divider()
+        st.subheader("Special Certification Flags not found in the workbook")
 
 with tab_lookup:
     # -----------------------------
