@@ -485,6 +485,18 @@ with tab_overview:
         st.bar_chart(lang_counts.head(top_n))
         st.caption("Y-axis = unique inactive tutors who report speaking the language.")
 
+#with tab_certs:
+    # -----------------------------
+    # Special Certification Flags
+    # -----------------------------
+
+    if sheets and "Special Certification Flags" in sheets:
+        st.subheader("Special Certification Flags")
+        flags = clean_excel_df(sheets["Special Certification Flags"])
+        # Drop any real "index" columns that may exist in the sheet
+        flags = flags.loc[:, ~flags.columns.astype(str).str.match(r"(?i)^index(\.|$)")]
+        st.dataframe(flags, use_container_width=True, hide_index=True)
+
 
 with tab_math:
     # -----------------------------
@@ -551,19 +563,6 @@ with tab_math:
                 )
     else:
         st.info("Math Specialty Coverage sheet not found in the workbook.")
-
-
-#with tab_certs:
-    # -----------------------------
-    # Special Certification Flags
-    # -----------------------------
-
-    if sheets and "Special Certification Flags" in sheets:
-        st.subheader("Special Certification Flags")
-        flags = clean_excel_df(sheets["Special Certification Flags"])
-        # Drop any real "index" columns that may exist in the sheet
-        flags = flags.loc[:, ~flags.columns.astype(str).str.match(r"(?i)^index(\.|$)")]
-        st.dataframe(flags, use_container_width=True, hide_index=True)
 
 with tab_lookup:
     # -----------------------------
