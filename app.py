@@ -311,16 +311,12 @@ else:
     c3.metric("ELA/Lit coverage (unique)", "—")
     c4.metric("SPED certified (unique)", "—")
 
-if sheets and "Special Certification Flags" in sheets:
-    st.subheader("Special Certification Flags")
-    flags = clean_excel_df(sheets["Special Certification Flags"])
-    # Drop any real "index" columns that may exist in the sheet
-    flags = flags.loc[:, ~flags.columns.astype(str).str.match(r"(?i)^index(\.|$)")]
-    st.dataframe(flags, use_container_width=True, hide_index=True)
 
 # -----------------------------
 # Coverage by grade level
 # -----------------------------
+
+st.divider()
 st.header("Coverage by Grade Level")
 
 if sheets and "Coverage Matrix" in sheets:
@@ -386,6 +382,8 @@ else:
 # -----------------------------
 # Coverage by language
 # -----------------------------
+
+st.divider()
 st.header("Coverage by Language")
 
 if tutor_long.empty:
@@ -413,6 +411,8 @@ else:
 # -----------------------------
 # Math Specialty Coverage + drill-down
 # -----------------------------
+
+st.divider()
 st.header("Math Specialty Coverage")
 
 if sheets and "Math Specialty Coverage" in sheets:
@@ -490,6 +490,18 @@ if sheets and "Math Specialty Coverage" in sheets:
             )
 else:
     st.info("Math Specialty Coverage sheet not found in the workbook.")
+
+# -----------------------------
+# Special Certification Flags
+# -----------------------------
+
+if sheets and "Special Certification Flags" in sheets:
+    st.divider()
+    st.subheader("Special Certification Flags")
+    flags = clean_excel_df(sheets["Special Certification Flags"])
+    # Drop any real "index" columns that may exist in the sheet
+    flags = flags.loc[:, ~flags.columns.astype(str).str.match(r"(?i)^index(\.|$)")]
+    st.dataframe(flags, use_container_width=True, hide_index=True)
 
 # -----------------------------
 # Tutor lookup + export
