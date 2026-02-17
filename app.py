@@ -254,12 +254,12 @@ st.markdown(
     """
 <style>
 /* reduce top padding a bit */
-.block-container { padding-top: 1.25rem; padding-bottom: 3rem; }
+.block-container { padding-top: 2.75rem; padding-bottom: 3rem; }
 
 /* sticky summary bar */
 .sticky-summary {
   position: sticky;
-  top: 0;
+  top: 3.25rem;
   z-index: 999;
   backdrop-filter: blur(8px);
   background: rgba(15, 17, 22, 0.75);
