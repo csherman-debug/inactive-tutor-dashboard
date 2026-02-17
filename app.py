@@ -513,7 +513,7 @@ with tab_math:
             st.caption("X-axis: math specialty label. Y-axis: unique inactive tutor counts.")
 
             if not tutor_long.empty:
-                st.subheader("Math Specialty Drill-down")
+                st.subheader("Math Specialty Filter")
                 specialty = st.selectbox("Select a math specialty to view tutors", plot_df[label_col].tolist())
 
                 mflt = tutor_long[(tutor_long["coverage_subject"] == "Math") & (tutor_long["math_specialty"] == specialty)].copy()
