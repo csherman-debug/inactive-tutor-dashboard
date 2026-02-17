@@ -386,7 +386,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 # -----------------------------
 # Tabs
 # -----------------------------
-tab_overview, tab_math, tab_certs, tab_lookup = st.tabs(["Coverage Overview", "Math Specializations", "Special Certifications", "Tutor Filter & Lookup"])
+tab_overview, tab_math, tab_lookup = st.tabs(["Coverage Overview", "Math Specializations", "Tutor Filter & Lookup"])
 
 with tab_overview:
     # -----------------------------
@@ -553,7 +553,7 @@ with tab_math:
         st.info("Math Specialty Coverage sheet not found in the workbook.")
 
 
-with tab_certs:
+#with tab_certs:
     # -----------------------------
     # Special Certification Flags
     # -----------------------------
