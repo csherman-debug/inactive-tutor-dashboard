@@ -9,8 +9,8 @@ from pathlib import Path
 EXCEL_FILE = "Inactive_Tutor_Executive_Report_v7_FULL_FINAL.xlsx"
 JSON_FILE  = "parsed_tutor_data.json"
 
-st.set_page_config(page_title="Inactive Tutor Dashboard", layout="wide")
-st.title("Inactive Tutor Dashboard (Inactive Pool)")
+st.set_page_config(page_title="Tutor Dashboard - Summaries & Lookup", layout="wide")
+st.title("Tutor Dashboard - Summaries & Lookup (Inactive Pool)")
 
 @st.cache_data
 def load_sheets(xlsx_path: str) -> dict[str, pd.DataFrame]:
@@ -108,6 +108,12 @@ def build_tutor_rows(tutors: list[dict]) -> pd.DataFrame:
     for t in tutors:
         tutor_id = t.get("tutor_id")
         name = t.get("name")
+        # Email is stored at top-level in parsed_tutor_data.json (preferred).
+        # If missing, try to pull it from raw_data fallbacks.
+        email = (t.get("email")
+                 or (t.get("raw_data", {}) or {}).get("personal_email")
+                 or (t.get("raw_data", {}) or {}).get("email")
+                 or (t.get("raw_data", {}) or {}).get("email_address"))
 
         langs = t.get("languages", []) or []
         langs_norm = sorted({str(x).strip() for x in langs if str(x).strip()})
@@ -132,6 +138,7 @@ def build_tutor_rows(tutors: list[dict]) -> pd.DataFrame:
                 rows.append({
                     "tutor_id": tutor_id,
                     "name": name,
+                    "email": email,
                     "coverage_subject": cov_subject,
                     "grade": int(g),
                     "math_specialty": specialty,
@@ -217,6 +224,53 @@ def make_grade_band_series(series_by_grade_label: pd.Series) -> pd.Series:
     out = out.reindex([b for b in order if b in out.index])
     return out
 
+
+def _bar_with_value_labels(df: pd.DataFrame, x: str, y: str, *, color: str | None = None, sort=None, height: int = 320, title: str | None = None):
+    """Altair bar chart with numeric labels above bars."""
+    enc = {
+        "x": alt.X(f"{x}:N", sort=sort, title=title or x),
+        "y": alt.Y(f"{y}:Q", title=y),
+        "tooltip": [alt.Tooltip(f"{x}:N"), alt.Tooltip(f"{y}:Q")],
+    }
+    if color:
+        enc["color"] = alt.Color(f"{color}:N", legend=alt.Legend(orient="top"))
+        enc["tooltip"].insert(1, alt.Tooltip(f"{color}:N"))
+
+    base = alt.Chart(df)
+    bars = base.mark_bar().encode(**enc)
+    text = base.mark_text(dy=-6, color="white").encode(
+        x=enc["x"],
+        y=enc["y"],
+        text=alt.Text(f"{y}:Q", format=",.0f"),
+    )
+    if color:
+        text = text.encode(color=alt.value("white"))
+    return (bars + text).properties(height=height)
+
+def _grouped_bar_with_labels(df_long: pd.DataFrame, x: str, y: str, group: str, *, sort=None, height: int = 320, x_title: str | None = None, y_title: str | None = None):
+    """Altair grouped bar chart (xOffset) with labels."""
+    base = alt.Chart(df_long)
+    bars = (
+        base.mark_bar()
+        .encode(
+            x=alt.X(f"{x}:N", sort=sort, title=x_title or x),
+            y=alt.Y(f"{y}:Q", title=y_title or y),
+            color=alt.Color(f"{group}:N", legend=alt.Legend(orient="top")),
+            xOffset=f"{group}:N",
+            tooltip=[f"{x}:N", f"{group}:N", f"{y}:Q"],
+        )
+    )
+    text = (
+        base.mark_text(dy=-6, color="white")
+        .encode(
+            x=alt.X(f"{x}:N", sort=sort),
+            y=alt.Y(f"{y}:Q"),
+            xOffset=f"{group}:N",
+            text=alt.Text(f"{y}:Q", format=",.0f"),
+        )
+    )
+    return (bars + text).properties(height=height)
+
 # -----------------------------
 # Load sources
 # -----------------------------
@@ -239,393 +293,490 @@ if json_exists:
         st.error(f"Failed to load JSON: {e}")
         tutor_long = pd.DataFrame()
 
-# -----------------------------
-# Sidebar filters (lookup only)
-# -----------------------------
-with st.sidebar:
-    st.subheader("Lookup filters")
-    if tutor_long.empty:
-        st.caption("Tutor-level filters available when parsed_tutor_data.json is present.")
-        search = ""
-        f_subjects = []
-        f_grades = []
-        f_specs = []
-        f_langs = []
-        require_ela = require_math = require_sped = require_ir = require_spanish = False
-    else:
-        search = st.text_input("Search tutor name", value="").strip()
-
-        subjects = sorted(tutor_long["coverage_subject"].dropna().unique().tolist())
-        f_subjects = st.multiselect("Coverage subject", subjects, default=subjects)
-
-        grades = sorted([int(x) for x in tutor_long["grade"].dropna().unique().tolist()])
-        # Grade filter supports ES/MS/HS + individual grades (K shown instead of 0)
-        grade_tokens = ["ES", "MS", "HS"] + [grade_int_to_label(g) for g in grades]
-        default_tokens = [grade_int_to_label(g) for g in grades]
-        selected_tokens = st.multiselect("Grade", grade_tokens, default=default_tokens)
-        # Expand tokens into grade integers
-        expanded = set()
-        for tok in selected_tokens:
-            for g in grade_token_to_grades(tok):
-                expanded.add(int(g))
-        f_grades = sorted(expanded)
-
-
-        specs = sorted(tutor_long["math_specialty"].dropna().unique().tolist())
-        f_specs = st.multiselect("Math specialty (optional)", specs, default=[])
-
-        lang_set = set()
-        for ls in tutor_long["languages"].tolist():
-            for l in (ls or []):
-                lang_set.add(str(l).strip())
-        all_langs = sorted([l for l in lang_set if l])
-        f_langs = st.multiselect("Language spoken (optional)", all_langs, default=[])
-
-        st.caption("Certification requirements")
-        require_ela = st.checkbox("Require ELA cert")
-        require_math = st.checkbox("Require Math cert")
-        require_sped = st.checkbox("Require SPED cert")
-        require_ir = st.checkbox("Require IR cert")
-        require_spanish = st.checkbox("Require Spanish cert")
 
 # -----------------------------
-# Executive summary
+# UI polish (CSS)
 # -----------------------------
-st.header("Executive Summary")
-c1, c2, c3, c4 = st.columns(4)
-if not tutor_long.empty:
-    c1.metric("Inactive tutors (unique)", f"{tutor_long['tutor_id'].nunique():,}")
-    c2.metric("Math coverage (unique)", f"{tutor_long.loc[tutor_long['coverage_subject']=='Math','tutor_id'].nunique():,}")
-    c3.metric("ELA/Lit coverage (unique)", f"{tutor_long.loc[tutor_long['coverage_subject']=='ELA/Literacy','tutor_id'].nunique():,}")
-    c4.metric("SPED certified (unique)", f"{tutor_long.loc[tutor_long['has_sped_cert']==True,'tutor_id'].nunique():,}")
-else:
-    c1.metric("Inactive tutors (unique)", "—")
-    c2.metric("Math coverage (unique)", "—")
-    c3.metric("ELA/Lit coverage (unique)", "—")
-    c4.metric("SPED certified (unique)", "—")
+st.markdown(
+    """
+<style>
+/* reduce top padding a bit */
+.block-container { padding-top: 2.75rem; padding-bottom: 3rem; }
 
-if sheets and "Special Certification Flags" in sheets:
-    st.subheader("Special Certification Flags")
+/* sticky summary bar */
+.sticky-summary {
+  position: sticky;
+  top: 3.25rem;
+  z-index: 999;
+  backdrop-filter: blur(8px);
+  background: rgba(15, 17, 22, 0.75);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 18px;
+  padding: 12px 14px;
+  margin: 10px 0 14px 0;
+}
 
-    flags_raw = clean_excel_df(sheets["Special Certification Flags"])
-    # Drop any real "index" columns that may exist in the sheet
-    flags_raw = flags_raw.loc[:, ~flags_raw.columns.astype(str).str.match(r"(?i)^index(\.|$)")]
+/* filter card */
+.filter-card {
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  border-radius: 18px;
+  padding: 14px 14px 6px 14px;
+  margin: 6px 0 12px 0;
+}
 
-    # Try to robustly pick a label column + count column, then chart.
-    try:
-        label_col, count_col, flags = pick_label_and_count_columns(flags_raw)
-        flags[count_col] = pd.to_numeric(flags[count_col], errors="coerce").fillna(0).astype(int)
-        flags[label_col] = flags[label_col].astype(str).str.strip()
-        flags = flags[flags[label_col].ne("")]
-
-        agg = (
-            flags[[label_col, count_col]]
-            .groupby(label_col, as_index=False)[count_col].sum()
-            .sort_values(count_col, ascending=False)
-        )
-
-        # Keep the pie readable: top 10 categories + "Other"
-        top_n = min(10, len(agg))
-        top = agg.head(top_n).copy()
-        if len(agg) > top_n:
-            other_val = int(agg.iloc[top_n:][count_col].sum())
-            top = pd.concat([top, pd.DataFrame({label_col: ["Other"], count_col: [other_val]})], ignore_index=True)
-
-        pie_df = top.rename(columns={label_col: "Flag", count_col: "Count"})
-
-        pie = (
-            alt.Chart(pie_df)
-            .mark_arc(innerRadius=40)
-            .encode(
-                theta=alt.Theta("Count:Q", stack=True),
-                color=alt.Color("Flag:N", legend=alt.Legend(orient="bottom", title=None)),
-                tooltip=["Flag:N", alt.Tooltip("Count:Q", format=",")],
-            )
-            .properties(height=320)
-        )
-
-        labels = (
-            alt.Chart(pie_df)
-            .mark_text(radius=120, size=12)
-            .encode(
-                theta=alt.Theta("Count:Q", stack=True),
-                text=alt.Text("Count:Q", format=","),
-            )
-        )
-
-        st.altair_chart(pie + labels, use_container_width=True)
-        st.caption("Pie shows top flags by count (top 10 + Other). Values are tutor counts.")
-    except Exception as e:
-        st.warning(f"Couldn't chart Special Certification Flags (showing table instead): {e}")
-        st.dataframe(flags_raw, use_container_width=True, hide_index=True)
+/* chips */
+.chips { display:flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.chip {
+  font-size: 0.85rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.05);
+  opacity: 0.95;
+}
+.muted { opacity: 0.75; font-size: 0.9rem; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
 # -----------------------------
-# Coverage by grade level
+# Lookup filter helpers (filters live in the Tutor Lookup tab)
 # -----------------------------
-st.header("Coverage by Grade Level")
+def apply_lookup_filters(
+    df: pd.DataFrame,
+    *,
+    search: str = "",
+    f_subjects: list[str] | None = None,
+    f_grades: list[int] | None = None,
+    f_specs: list[str] | None = None,
+    f_langs: list[str] | None = None,
+    require_ela: bool = False,
+    require_math: bool = False,
+    require_sped: bool = False,
+    require_ir: bool = False,
+    require_spanish: bool = False,
+) -> pd.DataFrame:
+    """Apply the Tutor Lookup filters to a tutor_long-style dataframe."""
+    if df.empty:
+        return df
 
-if sheets and "Coverage Matrix" in sheets:
-    cov = clean_excel_df(sheets["Coverage Matrix"])
-    cert = clean_excel_df(sheets["Certified Coverage Matrix"]) if (sheets and "Certified Coverage Matrix" in sheets) else None
-
-    subject_col = cov.columns[0]
-    grade_cols_raw = list(cov.columns[1:])
-    grade_cols = sort_grade_cols(grade_cols_raw)
-
-    subject = st.selectbox("Select subject area", sorted(cov[subject_col].dropna().unique().tolist()))
-    view_mode = st.radio("View", ["Grades", "Grade bands (K-5 / 6-8 / 9-12)"], horizontal=True, index=0)
-
-    total_row = cov.loc[cov[subject_col] == subject, grade_cols].iloc[0].fillna(0)
-    total_row = pd.to_numeric(total_row, errors="coerce").fillna(0).astype(int)
-
-    show_cert = st.checkbox("Show certified coverage overlay", value=True)
-
-    if view_mode == "Grades":
-        grade_order = ["K"] + [str(i) for i in range(1, 13)]
-        df_plot = pd.DataFrame({
-            "Grade": [display_grade_label(g) for g in grade_cols],
-            "Total Coverage": total_row.values,
-        })
-        if show_cert and cert is not None and subject in cert[subject_col].values:
-            cert_row = cert.loc[cert[subject_col] == subject, grade_cols].iloc[0].fillna(0)
-            cert_row = pd.to_numeric(cert_row, errors="coerce").fillna(0).astype(int)
-            df_plot["Certified Coverage"] = cert_row.values
-
-        # Force correct grade ordering (K,1,2,...,12) in the x-axis
-        df_plot["Grade"] = pd.Categorical(df_plot["Grade"], categories=grade_order, ordered=True)
-
-        value_cols = [c for c in df_plot.columns if c != "Grade"]
-        df_long = df_plot.melt(id_vars=["Grade"], value_vars=value_cols, var_name="Series", value_name="Count")
-
-        base = (
-            alt.Chart(df_long)
-            .encode(
-                x=alt.X("Grade:N", sort=grade_order, title="Grade"),
-                y=alt.Y("Count:Q", title="Tutor count"),
-                color=alt.Color("Series:N", legend=alt.Legend(orient="top")),
-                xOffset="Series:N",
-                tooltip=["Grade:N", "Series:N", "Count:Q"],
-            )
-        )
-
-        bars = base.mark_bar()
-        labels = base.mark_text(dy=-8).encode(text=alt.Text("Count:Q", format=","))
-
-        chart = (bars + labels).properties(height=360)
-        st.altair_chart(chart, use_container_width=True)
-    else:
-        total_band = make_grade_band_series(pd.Series(total_row.values, index=grade_cols))
-        band_df = pd.DataFrame({"Total Coverage": total_band.values}, index=total_band.index)
-        if show_cert and cert is not None and subject in cert[subject_col].values:
-            cert_row = cert.loc[cert[subject_col] == subject, grade_cols].iloc[0].fillna(0)
-            cert_row = pd.to_numeric(cert_row, errors="coerce").fillna(0).astype(int)
-            cert_band = make_grade_band_series(pd.Series(cert_row.values, index=grade_cols))
-            band_df["Certified Coverage"] = cert_band.values
-        band_plot = band_df.reset_index().rename(columns={"index": "Band"})
-        value_cols = [c for c in band_plot.columns if c != "Band"]
-        band_long = band_plot.melt(id_vars=["Band"], value_vars=value_cols, var_name="Series", value_name="Count")
-
-        band_base = (
-            alt.Chart(band_long)
-            .encode(
-                x=alt.X("Band:N", title="Grade band"),
-                y=alt.Y("Count:Q", title="Tutor count"),
-                color=alt.Color("Series:N", legend=alt.Legend(orient="top", title=None)),
-                xOffset="Series:N",
-                tooltip=["Band:N", "Series:N", "Count:Q"],
-            )
-        )
-        band_bars = band_base.mark_bar()
-        band_labels = band_base.mark_text(dy=-8).encode(text=alt.Text("Count:Q", format=","))
-
-        st.altair_chart((band_bars + band_labels).properties(height=320), use_container_width=True)
-
-    st.caption("Counts are unique inactive tutors from the executive workbook matrices.")
-else:
-    st.info("Coverage Matrix sheet not found in the workbook.")
-
-# -----------------------------
-# Coverage by language
-# -----------------------------
-st.header("Coverage by Language")
-
-if tutor_long.empty:
-    st.info("Language coverage requires parsed_tutor_data.json.")
-else:
-    # Do NOT drop_duplicates before exploding (languages is a list -> unhashable).
-    exploded = tutor_long[["tutor_id", "languages"]].explode("languages")
-    exploded["languages"] = exploded["languages"].fillna("").astype(str).str.strip()
-    exploded = exploded[exploded["languages"].ne("")]
-
-    # Unique tutor-language pairs, then count unique tutors per language
-    exploded = exploded.drop_duplicates(subset=["tutor_id", "languages"])
-    lang_counts = exploded.groupby("languages")["tutor_id"].nunique().sort_values(ascending=False)
-
-    top_n = st.slider(
-        "Show top N languages",
-        min_value=5,
-        max_value=50,
-        value=min(20, len(lang_counts)) if len(lang_counts) else 5,
-        step=5,
-    )
-    lang_df = lang_counts.head(top_n).reset_index()
-    lang_df.columns = ["Language", "Tutors"]
-
-    lang_base = (
-        alt.Chart(lang_df)
-        .encode(
-            x=alt.X("Language:N", sort="-y", title=None),
-            y=alt.Y("Tutors:Q", title="Unique tutors"),
-            tooltip=["Language:N", alt.Tooltip("Tutors:Q", format=",")],
-        )
-    )
-    lang_bars = lang_base.mark_bar()
-    lang_labels = lang_base.mark_text(dy=-8).encode(text=alt.Text("Tutors:Q", format=","))
-
-    st.altair_chart((lang_bars + lang_labels).properties(height=360), use_container_width=True)
-    st.caption("Y-axis = unique inactive tutors who report speaking the language.")
-
-# -----------------------------
-# Math Specialty Coverage + drill-down
-# -----------------------------
-st.header("Math Specialty Coverage")
-
-if sheets and "Math Specialty Coverage" in sheets:
-    ms_raw = clean_excel_df(sheets["Math Specialty Coverage"])
-    if ms_raw.shape[1] < 2:
-        st.warning("Math Specialty Coverage sheet doesn't have at least 2 columns.")
-    else:
-        label_col, count_col, ms = pick_label_and_count_columns(ms_raw)
-        ms[count_col] = pd.to_numeric(ms[count_col], errors="coerce").fillna(0).astype(int)
-        ms[label_col] = ms[label_col].astype(str).str.strip()
-        ms = ms[ms[label_col].ne("")]
-
-        plot_df = (
-            ms[[label_col, count_col]]
-            .groupby(label_col, as_index=False)[count_col].sum()
-            .sort_values(count_col, ascending=False)
-        )
-        ms_base = (
-            alt.Chart(plot_df)
-            .encode(
-                x=alt.X(f"{label_col}:N", sort="-y", title=None),
-                y=alt.Y(f"{count_col}:Q", title="Unique tutors"),
-                tooltip=[alt.Tooltip(f"{label_col}:N", title="Specialty"), alt.Tooltip(f"{count_col}:Q", format=",")],
-            )
-        )
-        ms_bars = ms_base.mark_bar()
-        ms_labels = ms_base.mark_text(dy=-8).encode(text=alt.Text(f"{count_col}:Q", format=","))
-
-        st.altair_chart((ms_bars + ms_labels).properties(height=360), use_container_width=True)
-        st.caption("X-axis: math specialty label. Y-axis: unique inactive tutor counts.")
-
-        if not tutor_long.empty:
-            st.subheader("Math Specialty Drill-down")
-            specialty = st.selectbox("Select a math specialty to view tutors", plot_df[label_col].tolist())
-
-            mflt = tutor_long[(tutor_long["coverage_subject"] == "Math") & (tutor_long["math_specialty"] == specialty)].copy()
-
-            if f_grades:
-                mflt = mflt[mflt["grade"].isin(f_grades)]
-            if f_langs:
-                mflt = mflt.loc[mask_has_any_language(mflt, f_langs)]
-            if require_math:
-                mflt = mflt[mflt["has_math_cert"] == True]
-            if require_sped:
-                mflt = mflt[mflt["has_sped_cert"] == True]
-            if require_ela:
-                mflt = mflt[mflt["has_ela_cert"] == True]
-            if require_ir:
-                mflt = mflt[mflt["has_ir_cert"] == True]
-            if require_spanish:
-                mflt = mflt[mflt["has_spanish_cert"] == True]
-            if search:
-                mflt = mflt[mflt["name"].fillna("").str.contains(search, case=False)]
-
-            st.write(f"Matching tutor-grade rows: **{len(mflt):,}**")
-            st.write(f"Unique tutors: **{mflt['tutor_id'].nunique():,}**")
-
-            tutors_df = (
-                mflt.groupby(["tutor_id", "name"], as_index=False)
-                .agg(
-                    grades=("grade", lambda g: ", ".join(map(str, sorted(set(map(int, g)))))),
-                    languages=("languages_str", "first"),
-                    certs=("cert_subjects", lambda c: ", ".join(sorted(set(sum(c, []))))),
-                )
-                .sort_values("name")
-            )
-
-            st.dataframe(tutors_df, use_container_width=True, hide_index=True)
-
-            specialty_safe = re.sub(r"[^A-Za-z0-9]+", "_", str(specialty)).strip("_").lower() or "specialty"
-            out = io.BytesIO()
-            tutors_df.to_excel(out, index=False, engine="openpyxl")
-            st.download_button(
-                "Download this specialty list (Excel)",
-                data=out.getvalue(),
-                file_name=f"math_specialty_{specialty_safe}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-else:
-    st.info("Math Specialty Coverage sheet not found in the workbook.")
-
-# -----------------------------
-# Tutor lookup + export
-# -----------------------------
-st.header("Tutor Lookup")
-
-if tutor_long.empty:
-    st.info("Tutor lookup is disabled until parsed_tutor_data.json is present and readable.")
-else:
-    flt = tutor_long.copy()
+    out = df.copy()
 
     if f_subjects:
-        flt = flt[flt["coverage_subject"].isin(f_subjects)]
+        out = out[out["coverage_subject"].isin(f_subjects)]
     if f_grades:
-        flt = flt[flt["grade"].isin(f_grades)]
-
+        out = out[out["grade"].isin(f_grades)]
     if f_specs:
-        flt = flt[flt["math_specialty"].isin(f_specs)]
+        out = out[out["math_specialty"].isin(f_specs)]
     if f_langs:
-        flt = flt.loc[mask_has_any_language(flt, f_langs)]
+        out = out.loc[mask_has_any_language(out, f_langs)]
 
     if require_ela:
-        flt = flt[flt["has_ela_cert"] == True]
+        out = out[out["has_ela_cert"] == True]
     if require_math:
-        flt = flt[flt["has_math_cert"] == True]
+        out = out[out["has_math_cert"] == True]
     if require_sped:
-        flt = flt[flt["has_sped_cert"] == True]
+        out = out[out["has_sped_cert"] == True]
     if require_ir:
-        flt = flt[flt["has_ir_cert"] == True]
+        out = out[out["has_ir_cert"] == True]
     if require_spanish:
-        flt = flt[flt["has_spanish_cert"] == True]
+        out = out[out["has_spanish_cert"] == True]
 
     if search:
-        flt = flt[flt["name"].fillna("").str.contains(search, case=False)]
+        out = out[out["name"].fillna("").str.contains(str(search).strip(), case=False)]
 
-    tutors_df = (
-        flt.groupby(["tutor_id", "name"], as_index=False)
-        .agg(
-            subjects=("coverage_subject", lambda s: ", ".join(sorted(set(s)))),
-            grades=("grade", lambda g: ", ".join(map(str, sorted(set(map(int, g)))))),
-            specialties=("math_specialty", lambda s: ", ".join(sorted(set([x for x in s if pd.notna(x)])))),
-            languages=("languages_str", "first"),
-            certs=("cert_subjects", lambda c: ", ".join(sorted(set(sum(c, []))))),
+    return out
+
+
+def get_lookup_filter_options(tutor_long: pd.DataFrame):
+    """Build option lists for the Tutor Lookup filters."""
+    subjects_all = sorted(tutor_long["coverage_subject"].dropna().unique().tolist())
+    grades_all = sorted([int(x) for x in tutor_long["grade"].dropna().unique().tolist()])
+    grade_tokens_all = ["ES", "MS", "HS"] + [grade_int_to_label(g) for g in grades_all]
+    default_tokens = [grade_int_to_label(g) for g in grades_all]
+
+    specs_all = sorted(tutor_long["math_specialty"].dropna().unique().tolist())
+    lang_set = set()
+    for ls in tutor_long["languages"].tolist():
+        for l in (ls or []):
+            lang_set.add(str(l).strip())
+    langs_all = sorted([l for l in lang_set if l])
+
+    return subjects_all, grade_tokens_all, default_tokens, specs_all, langs_all
+
+
+# -----------------------------
+# Sticky summary (top)
+# -----------------------------
+if tutor_long.empty:
+    total_unique = 0
+    total_math = 0
+    total_ela = 0
+    total_sped = 0
+else:
+    total_unique = int(tutor_long["tutor_id"].nunique())
+    total_math = int(tutor_long.loc[tutor_long["coverage_subject"] == "Math", "tutor_id"].nunique())
+    total_ela = int(tutor_long.loc[tutor_long["coverage_subject"] == "ELA/Literacy", "tutor_id"].nunique())
+    total_sped = int(tutor_long.loc[tutor_long["has_sped_cert"] == True, "tutor_id"].nunique())
+
+st.markdown('<div class="sticky-summary">', unsafe_allow_html=True)
+m1, m2, m3, m4 = st.columns([1, 1, 1, 1])
+m1.metric("Total inactive tutors", f"{total_unique:,}" if total_unique else "—")
+m2.metric("Math coverage", f"{total_math:,}" if total_unique else "—")
+m3.metric("ELA/Lit coverage", f"{total_ela:,}" if total_unique else "—")
+m4.metric("SPED certified", f"{total_sped:,}" if total_unique else "—")
+
+# -----------------------------
+# Tabs
+# -----------------------------
+tab_overview, tab_lookup = st.tabs(["Coverage Overview", "Tutor Filter & Lookup"])
+
+with tab_overview:
+    # -----------------------------
+    # Coverage by grade level
+    # -----------------------------
+
+    st.subheader("Coverage by Grade Level")
+
+    if sheets and "Coverage Matrix" in sheets:
+        cov = clean_excel_df(sheets["Coverage Matrix"])
+        cert = clean_excel_df(sheets["Certified Coverage Matrix"]) if (sheets and "Certified Coverage Matrix" in sheets) else None
+
+        subject_col = cov.columns[0]
+        grade_cols_raw = list(cov.columns[1:])
+        grade_cols = sort_grade_cols(grade_cols_raw)
+
+        subject = st.selectbox("Select subject area", sorted(cov[subject_col].dropna().unique().tolist()))
+        view_mode = st.radio("View", ["Grades", "Grade bands (K-5 / 6-8 / 9-12)"], horizontal=True, index=0)
+
+        total_row = cov.loc[cov[subject_col] == subject, grade_cols].iloc[0].fillna(0)
+        total_row = pd.to_numeric(total_row, errors="coerce").fillna(0).astype(int)
+
+        show_cert = st.checkbox("Show certified coverage overlay", value=True)
+
+        if view_mode == "Grades":
+            grade_order = ["K"] + [str(i) for i in range(1, 13)]
+            df_plot = pd.DataFrame({
+                "Grade": [display_grade_label(g) for g in grade_cols],
+                "Total Coverage": total_row.values,
+            })
+            if show_cert and cert is not None and subject in cert[subject_col].values:
+                cert_row = cert.loc[cert[subject_col] == subject, grade_cols].iloc[0].fillna(0)
+                cert_row = pd.to_numeric(cert_row, errors="coerce").fillna(0).astype(int)
+                df_plot["Certified Coverage"] = cert_row.values
+
+            # Force correct grade ordering (K,1,2,...,12) in the x-axis
+            df_plot["Grade"] = pd.Categorical(df_plot["Grade"], categories=grade_order, ordered=True)
+
+            value_cols = [c for c in df_plot.columns if c != "Grade"]
+            df_long = df_plot.melt(id_vars=["Grade"], value_vars=value_cols, var_name="Series", value_name="Count")
+
+
+            chart = _grouped_bar_with_labels(
+                df_long,
+                x="Grade",
+                y="Count",
+                group="Series",
+                sort=grade_order,
+                height=360,
+                x_title="Grade",
+                y_title="Tutor count",
+            )
+            st.altair_chart(chart, use_container_width=True)
+        else:
+            total_band = make_grade_band_series(pd.Series(total_row.values, index=grade_cols))
+            band_df = pd.DataFrame({"Total Coverage": total_band.values}, index=total_band.index)
+            if show_cert and cert is not None and subject in cert[subject_col].values:
+                cert_row = cert.loc[cert[subject_col] == subject, grade_cols].iloc[0].fillna(0)
+                cert_row = pd.to_numeric(cert_row, errors="coerce").fillna(0).astype(int)
+                cert_band = make_grade_band_series(pd.Series(cert_row.values, index=grade_cols))
+                band_df["Certified Coverage"] = cert_band.values
+            band_plot = band_df.reset_index().rename(columns={"index": "Band"})
+            band_long = band_plot.melt(id_vars=["Band"], var_name="Series", value_name="Count")
+            chart_band = _grouped_bar_with_labels(band_long, x="Band", y="Count", group="Series", sort=["K-5","6-8","9-12","Other"], height=320, x_title="Grade band", y_title="Tutor count")
+            st.altair_chart(chart_band, use_container_width=True)
+
+        st.caption("Individual grades show unique tutors. Grade bands are culumlative and will include overlap (e.g. a tutor that is certified in K-5 will be represented five times in that grade band).")
+    else:
+        st.info("Coverage Matrix sheet not found in the workbook.")
+
+    # -----------------------------
+    # Math Specialty Coverage 
+    # -----------------------------
+
+    st.divider()
+    st.subheader("Coverage by Language")
+
+    if tutor_long.empty:
+        st.info("Language coverage requires parsed_tutor_data.json.")
+    else:
+        # Do NOT drop_duplicates before exploding (languages is a list -> unhashable).
+        exploded = tutor_long[["tutor_id", "languages"]].explode("languages")
+        exploded["languages"] = exploded["languages"].fillna("").astype(str).str.strip()
+        exploded = exploded[exploded["languages"].ne("")]
+
+        # Unique tutor-language pairs, then count unique tutors per language
+        exploded = exploded.drop_duplicates(subset=["tutor_id", "languages"])
+        lang_counts = exploded.groupby("languages")["tutor_id"].nunique().sort_values(ascending=False)
+
+        top_n = st.slider(
+            "Show top N languages",
+            min_value=5,
+            max_value=50,
+            value=min(20, len(lang_counts)) if len(lang_counts) else 5,
+            step=5,
         )
-        .sort_values("name")
-    )
+        lang_df = lang_counts.head(top_n).reset_index()
+        lang_df.columns = ["Language", "Tutors"]
+        chart_lang = _bar_with_value_labels(lang_df, x="Language", y="Tutors", sort=lang_df["Language"].tolist(), height=320, title="Language")
+        st.altair_chart(chart_lang, use_container_width=True)
+        st.caption("Y-axis = Unique tutors who report speaking the language.")
 
-    st.subheader("Results")
-    st.write(f"Matching tutor-grade rows: **{len(flt):,}**")
-    st.write(f"Unique tutors: **{len(tutors_df):,}**")
-    st.dataframe(tutors_df, use_container_width=True, hide_index=True)
+    # -----------------------------
+    # Special Certification Flags
+    st.divider()
+    st.subheader("Math Specialty Coverage")
 
-    st.subheader("Export")
-    out = io.BytesIO()
-    tutors_df.to_excel(out, index=False, engine="openpyxl")
-    st.download_button(
-        "Download filtered tutors (Excel)",
-        data=out.getvalue(),
-        file_name="filtered_inactive_tutors.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+    if sheets and "Math Specialty Coverage" in sheets:
+        ms_raw = clean_excel_df(sheets["Math Specialty Coverage"])
+        if ms_raw.shape[1] < 2:
+            st.warning("Math Specialty Coverage sheet doesn't have at least 2 columns.")
+        else:
+            label_col, count_col, ms = pick_label_and_count_columns(ms_raw)
+            ms[count_col] = pd.to_numeric(ms[count_col], errors="coerce").fillna(0).astype(int)
+            ms[label_col] = ms[label_col].astype(str).str.strip()
+            ms = ms[ms[label_col].ne("")]
+
+            plot_df = (
+                ms[[label_col, count_col]]
+                .groupby(label_col, as_index=False)[count_col].sum()
+                .sort_values(count_col, ascending=False)
+            )
+
+            chart_ms = _bar_with_value_labels(plot_df, x=label_col, y=count_col, sort=plot_df[label_col].tolist(), height=320, title="Math specialty")
+            st.altair_chart(chart_ms, use_container_width=True)
+            st.caption("X-axis: Math specialty. Y-axis: Unique tutor count")
+
+    else:
+        st.info("Math Specialty Coverage sheet not found in the workbook.")
+    
+    # -----------------------------
+    # Coverage by language
+    # -----------------------------
+
+    # -----------------------------
+
+    if sheets and "Special Certification Flags" in sheets:
+        st.divider()
+        st.subheader("Special Certification Flags")
+        flags_raw = clean_excel_df(sheets["Special Certification Flags"])
+        # Drop any real "index" columns that may exist in the sheet
+        flags_raw = flags_raw.loc[:, ~flags_raw.columns.astype(str).str.match(r"(?i)^index(\.|$)")]
+        if flags_raw.shape[1] < 2:
+            st.dataframe(flags_raw, use_container_width=True, hide_index=True)
+        else:
+            label_col, count_col, flags = pick_label_and_count_columns(flags_raw)
+            flags[label_col] = flags[label_col].astype(str).str.strip()
+            flags[count_col] = pd.to_numeric(flags[count_col], errors="coerce").fillna(0).astype(int)
+            plot_df = (
+                flags[[label_col, count_col]]
+                .groupby(label_col, as_index=False)[count_col].sum()
+                .sort_values(count_col, ascending=False)
+            )
+            # Keep chart readable: top 10 + "Other"
+            top_k = 10
+            if len(plot_df) > top_k:
+                top = plot_df.head(top_k).copy()
+                other_sum = int(plot_df.iloc[top_k:][count_col].sum())
+                other = pd.DataFrame([{label_col: "Other", count_col: other_sum}])
+                plot_df = pd.concat([top, other], ignore_index=True)
+
+            pie = (
+                alt.Chart(plot_df)
+                .mark_arc()
+                .encode(
+                    theta=alt.Theta(f"{count_col}:Q", title="Tutors"),
+                    color=alt.Color(f"{label_col}:N", legend=alt.Legend(orient="right")),
+                    tooltip=[alt.Tooltip(f"{label_col}:N", title="Flag"), alt.Tooltip(f"{count_col}:Q", title="Tutors")],
+                )
+                .properties(height=360)
+            )
+            st.altair_chart(pie, use_container_width=True)
+            st.caption("Pie shows unique inactive tutor counts by flag (top 10 + Other).")
+    else:
+        st.divider()
+        st.subheader("Special Certification Flags not found in the workbook")
+
+with tab_lookup:
+    # -----------------------------
+    # Tutor lookup + export
+    # -----------------------------
+    st.subheader("Tutor Filters & Lookup")
+
+    if tutor_long.empty:
+        st.info("Tutor lookup is disabled until parsed_tutor_data.json is present and readable.")
+    else:
+        # Build filter options
+        subjects_all, grade_tokens_all, default_tokens, specs_all, langs_all = get_lookup_filter_options(tutor_long)
+
+        # Filters (apply only to this tab)
+        st.markdown('<div class="filter-card">', unsafe_allow_html=True)
+        st.subheader("Filters", anchor=False)
+
+        export_slot = None
+
+
+        cA, cB, cC, cD = st.columns([1.2, 1.2, 1.0, 0.6])
+        with cD:
+            if st.button("Reset", use_container_width=True):
+                for k in [
+                    "lookup_search", "lookup_f_subjects", "lookup_selected_tokens",
+                    "lookup_f_langs", "lookup_f_specs",
+                    "lookup_require_ela", "lookup_require_math", "lookup_require_sped",
+                    "lookup_require_ir", "lookup_require_spanish",
+                ]:
+                    st.session_state.pop(k, None)
+                st.rerun()
+
+            export_slot = st.empty()
+
+
+        with cA:
+            search = st.text_input(
+                "Search tutor name",
+                value=st.session_state.get("lookup_search", ""),
+            ).strip()
+            st.session_state["lookup_search"] = search
+
+            f_subjects = st.multiselect(
+                "Coverage subject",
+                subjects_all,
+                default=st.session_state.get("lookup_f_subjects", subjects_all),
+            )
+            st.session_state["lookup_f_subjects"] = f_subjects
+
+        with cB:
+            selected_tokens = st.multiselect(
+                "Grade (ES/MS/HS or individual)",
+                grade_tokens_all,
+                default=st.session_state.get("lookup_selected_tokens", default_tokens),
+            )
+            st.session_state["lookup_selected_tokens"] = selected_tokens
+
+            expanded = set()
+            for tok in selected_tokens:
+                for g in grade_token_to_grades(tok):
+                    expanded.add(int(g))
+            f_grades = sorted(expanded)
+
+            f_langs = st.multiselect(
+                "Language spoken (optional)",
+                langs_all,
+                default=st.session_state.get("lookup_f_langs", []),
+            )
+            st.session_state["lookup_f_langs"] = f_langs
+
+        with cC:
+            f_specs = st.multiselect(
+                "Math specialty (optional)",
+                specs_all,
+                default=st.session_state.get("lookup_f_specs", []),
+            )
+            st.session_state["lookup_f_specs"] = f_specs
+
+            st.caption("Certification requirements")
+            require_ela = st.checkbox("Require ELA cert", value=st.session_state.get("lookup_require_ela", False))
+            require_math = st.checkbox("Require Math cert", value=st.session_state.get("lookup_require_math", False))
+            require_sped = st.checkbox("Require SPED cert", value=st.session_state.get("lookup_require_sped", False))
+            require_ir = st.checkbox("Require IR cert", value=st.session_state.get("lookup_require_ir", False))
+            require_spanish = st.checkbox("Require Spanish cert", value=st.session_state.get("lookup_require_spanish", False))
+
+            st.session_state["lookup_require_ela"] = require_ela
+            st.session_state["lookup_require_math"] = require_math
+            st.session_state["lookup_require_sped"] = require_sped
+            st.session_state["lookup_require_ir"] = require_ir
+            st.session_state["lookup_require_spanish"] = require_spanish
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Apply filters
+        flt = apply_lookup_filters(
+            tutor_long,
+            search=search,
+            f_subjects=f_subjects,
+            f_grades=f_grades,
+            f_specs=f_specs,
+            f_langs=f_langs,
+            require_ela=require_ela,
+            require_math=require_math,
+            require_sped=require_sped,
+            require_ir=require_ir,
+            require_spanish=require_spanish,
+        )
+
+        # Summary for this tab
+        unique_filtered = int(flt["tutor_id"].nunique()) if not flt.empty else 0
+        chips = []
+        if search:
+            chips.append(f"Search: {search}")
+        if f_subjects and len(f_subjects) != len(subjects_all):
+            chips.append(f"Subjects: {len(f_subjects)}")
+        if f_grades:
+            chips.append(f"Grades: {len(f_grades)}")
+        if f_langs:
+            chips.append("Lang: " + ", ".join(f_langs[:3]) + ("…" if len(f_langs) > 3 else ""))
+        if f_specs:
+            chips.append("Spec: " + ", ".join(f_specs[:2]) + ("…" if len(f_specs) > 2 else ""))
+        if require_ela: chips.append("Req: ELA")
+        if require_math: chips.append("Req: Math")
+        if require_sped: chips.append("Req: SPED")
+        if require_ir: chips.append("Req: IR")
+        if require_spanish: chips.append("Req: Spanish")
+
+        st.caption(" | ".join(chips) if chips else "No filters applied.")
+
+        # Build export table (one row per tutor). Keep tutor_id for export, but hide it in the on-page table.
+        agg_map = {
+            "subjects": ("coverage_subject", lambda s: ", ".join(sorted(set(s)))),
+            "grades": ("grade", lambda g: ", ".join(map(str, sorted(set(map(int, g)))))),
+            "specialties": ("math_specialty", lambda s: ", ".join(sorted(set([x for x in s if pd.notna(x)])))),
+            "languages": ("languages_str", "first"),
+            "certs": ("cert_subjects", lambda c: ", ".join(sorted(set(sum(c, []))))),
+        }
+        if "email" in flt.columns:
+            agg_map["email"] = ("email", "first")
+
+        tutors_df = (
+            flt.groupby(["tutor_id", "name"], as_index=False)
+            .agg(**agg_map)
+            .sort_values("name")
+        )
+
+        st.subheader("Results")
+        st.write(f"Matching tutor-grade rows: **{len(flt):,}**")
+        st.write(f"Unique tutors: **{len(tutors_df):,}**")
+
+        display_df = tutors_df.drop(columns=["tutor_id"], errors="ignore")
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+        # Export button lives in the Filters panel (top-right) for visibility.
+        out = io.BytesIO()
+        tutors_df.to_excel(out, index=False, engine="openpyxl")
+        if export_slot is not None:
+            export_slot.download_button(
+                "Download (Excel)",
+                data=out.getvalue(),
+                file_name="filtered_inactive_tutors.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        else:
+            st.download_button(
+                "Download filtered tutors (Excel)",
+                data=out.getvalue(),
+                file_name="filtered_inactive_tutors.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
