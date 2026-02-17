@@ -503,8 +503,7 @@ band_long = band_plot.melt(
     value_name="Count"
 )
 chart_band = _grouped_bar_with_labels(band_long, x="Band", y="Count", group="Series", sort=["K-5","6-8","9-12","Other"], height=320, x_title="Grade band", y_title="Tutor count")
-            st.altair_chart(chart_band, use_container_width=True)
-
+        st.altair_chart(chart_band, use_container_width=True)
         st.caption("Individual grades show unique tutors. Grade bands are culumlative and will include overlap (e.g. a tutor that is certified in K-5 will be represented five times in that grade band).")
     else:
         st.info("Coverage Matrix sheet not found in the workbook.")
