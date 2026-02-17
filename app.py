@@ -9,7 +9,7 @@ from pathlib import Path
 EXCEL_FILE = "Inactive_Tutor_Executive_Report_v7_FULL_FINAL.xlsx"
 JSON_FILE  = "parsed_tutor_data.json"
 
-st.set_page_config(page_title="Inactive Tutor Dashboard", layout="wide")
+st.set_page_config(page_title="Tutor Dashboard - Summaries & Lookup", layout="wide")
 st.title("Inactive Tutor Dashboard (Inactive Pool)")
 
 @st.cache_data
@@ -386,7 +386,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 # -----------------------------
 # Tabs
 # -----------------------------
-tab_overview, tab_math, tab_certs, tab_lookup = st.tabs(["Overview", "Math", "Certifications", "Tutor Lookup"])
+tab_overview, tab_math, tab_certs, tab_lookup = st.tabs(["Coverage Overview", "Math Specializations", "Special Certifications", "Tutor Filter & Lookup"])
 
 with tab_overview:
     # -----------------------------
@@ -569,7 +569,7 @@ with tab_lookup:
     # -----------------------------
     # Tutor lookup + export
     # -----------------------------
-    st.subheader("Tutor Lookup")
+    st.subheader("Tutor Filters & Lookup")
 
     if tutor_long.empty:
         st.info("Tutor lookup is disabled until parsed_tutor_data.json is present and readable.")
