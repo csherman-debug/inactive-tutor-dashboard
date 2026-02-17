@@ -551,7 +551,7 @@ with tab_overview:
     # Coverage by Math Specialization
     # -----------------------------
     st.divider()
-    st.subheader("Math Specialty Coverage")
+    st.subheader("Coverage by Math Specialization")
 
     if sheets and "Math Specialty Coverage" in sheets:
         ms_raw = clean_excel_df(sheets["Math Specialty Coverage"])
@@ -582,7 +582,7 @@ with tab_overview:
 
     if sheets and "Special Certification Flags" in sheets:
         st.divider()
-        st.subheader("Special Certification Flags")
+        st.subheader("Coverage by Special Certification Type")
         flags_raw = clean_excel_df(sheets["Special Certification Flags"])
         # Drop any real "index" columns that may exist in the sheet
         flags_raw = flags_raw.loc[:, ~flags_raw.columns.astype(str).str.match(r"(?i)^index(\.|$)")]
@@ -615,7 +615,7 @@ with tab_overview:
             )
             
             st.altair_chart(chart_flags, use_container_width=True)
-            st.caption("Unique inactive tutor counts by special certification flag (top 10 + Other).")
+            st.caption("Unique tutor counts by special certification (top 10 + Other).")
 
     else:
         st.divider()
