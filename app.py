@@ -295,11 +295,26 @@ st.markdown(
 )
 
 # -----------------------------
-# Filters (main page)
+# Lookup filter helpers (filters live in the Tutor Lookup tab)
 # -----------------------------
-def apply_lookup_filters(df: pd.DataFrame) -> pd.DataFrame:
+def apply_lookup_filters(
+    df: pd.DataFrame,
+    *,
+    search: str = "",
+    f_subjects: list[str] | None = None,
+    f_grades: list[int] | None = None,
+    f_specs: list[str] | None = None,
+    f_langs: list[str] | None = None,
+    require_ela: bool = False,
+    require_math: bool = False,
+    require_sped: bool = False,
+    require_ir: bool = False,
+    require_spanish: bool = False,
+) -> pd.DataFrame:
+    """Apply the Tutor Lookup filters to a tutor_long-style dataframe."""
     if df.empty:
         return df
+
     out = df.copy()
 
     if f_subjects:
@@ -323,20 +338,13 @@ def apply_lookup_filters(df: pd.DataFrame) -> pd.DataFrame:
         out = out[out["has_spanish_cert"] == True]
 
     if search:
-        out = out[out["name"].fillna("").str.contains(search, case=False)]
+        out = out[out["name"].fillna("").str.contains(str(search).strip(), case=False)]
 
     return out
 
-# Build filter options
-if tutor_long.empty:
-    search = ""
-    f_subjects = []
-    f_grades = []
-    f_specs = []
-    f_langs = []
-    require_ela = require_math = require_sped = require_ir = require_spanish = False
-    st.info("Tutor-level filters and lookup require parsed_tutor_data.json.")
-else:
+
+def get_lookup_filter_options(tutor_long: pd.DataFrame):
+    """Build option lists for the Tutor Lookup filters."""
     subjects_all = sorted(tutor_long["coverage_subject"].dropna().unique().tolist())
     grades_all = sorted([int(x) for x in tutor_long["grade"].dropna().unique().tolist()])
     grade_tokens_all = ["ES", "MS", "HS"] + [grade_int_to_label(g) for g in grades_all]
@@ -349,112 +357,30 @@ else:
             lang_set.add(str(l).strip())
     langs_all = sorted([l for l in lang_set if l])
 
-    st.markdown('<div class="filter-card">', unsafe_allow_html=True)
-    st.subheader("Filters", anchor=False)
-    cA, cB, cC = st.columns([1.2, 1.2, 1.0])
-    with cA:
-        search = st.text_input("Search tutor name", value=st.session_state.get("search", "")).strip()
-        st.session_state["search"] = search
+    return subjects_all, grade_tokens_all, default_tokens, specs_all, langs_all
 
-        f_subjects = st.multiselect(
-            "Coverage subject",
-            subjects_all,
-            default=st.session_state.get("f_subjects", subjects_all),
-        )
-        st.session_state["f_subjects"] = f_subjects
-
-    with cB:
-        selected_tokens = st.multiselect(
-            "Grade (ES/MS/HS or individual)",
-            grade_tokens_all,
-            default=st.session_state.get("selected_tokens", default_tokens),
-        )
-        st.session_state["selected_tokens"] = selected_tokens
-
-        expanded = set()
-        for tok in selected_tokens:
-            for g in grade_token_to_grades(tok):
-                expanded.add(int(g))
-        f_grades = sorted(expanded)
-
-        f_langs = st.multiselect(
-            "Language spoken (optional)",
-            langs_all,
-            default=st.session_state.get("f_langs", []),
-        )
-        st.session_state["f_langs"] = f_langs
-
-    with cC:
-        f_specs = st.multiselect(
-            "Math specialty (optional)",
-            specs_all,
-            default=st.session_state.get("f_specs", []),
-        )
-        st.session_state["f_specs"] = f_specs
-
-        st.caption("Certification requirements")
-        require_ela = st.checkbox("Require ELA cert", value=st.session_state.get("require_ela", False))
-        require_math = st.checkbox("Require Math cert", value=st.session_state.get("require_math", False))
-        require_sped = st.checkbox("Require SPED cert", value=st.session_state.get("require_sped", False))
-        require_ir = st.checkbox("Require IR cert", value=st.session_state.get("require_ir", False))
-        require_spanish = st.checkbox("Require Spanish cert", value=st.session_state.get("require_spanish", False))
-
-        st.session_state["require_ela"] = require_ela
-        st.session_state["require_math"] = require_math
-        st.session_state["require_sped"] = require_sped
-        st.session_state["require_ir"] = require_ir
-        st.session_state["require_spanish"] = require_spanish
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # -----------------------------
 # Sticky summary (top)
 # -----------------------------
 if tutor_long.empty:
     total_unique = 0
-    filtered_unique = 0
-    filtered_math = 0
-    filtered_ela = 0
-    filtered_sped = 0
+    total_math = 0
+    total_ela = 0
+    total_sped = 0
 else:
     total_unique = int(tutor_long["tutor_id"].nunique())
-    flt_summary = apply_lookup_filters(tutor_long)
-    filtered_unique = int(flt_summary["tutor_id"].nunique()) if not flt_summary.empty else 0
-    filtered_math = int(flt_summary.loc[flt_summary["coverage_subject"] == "Math", "tutor_id"].nunique()) if not flt_summary.empty else 0
-    filtered_ela = int(flt_summary.loc[flt_summary["coverage_subject"] == "ELA/Literacy", "tutor_id"].nunique()) if not flt_summary.empty else 0
-    filtered_sped = int(flt_summary.loc[flt_summary["has_sped_cert"] == True, "tutor_id"].nunique()) if not flt_summary.empty else 0
-
-# active filter chips
-chips = []
-if search:
-    chips.append(f"Search: {search}")
-if tutor_long is not None and not tutor_long.empty:
-    if f_subjects and len(f_subjects) != len(sorted(tutor_long["coverage_subject"].dropna().unique().tolist())):
-        chips.append(f"Subjects: {len(f_subjects)}")
-    if f_grades and len(f_grades) != len(sorted([int(x) for x in tutor_long['grade'].dropna().unique().tolist()])):
-        chips.append(f"Grades: {len(f_grades)}")
-if f_langs:
-    chips.append("Lang: " + ", ".join(f_langs[:3]) + ("…" if len(f_langs) > 3 else ""))
-if f_specs:
-    chips.append("Spec: " + ", ".join(f_specs[:2]) + ("…" if len(f_specs) > 2 else ""))
-if require_ela: chips.append("Req: ELA")
-if require_math: chips.append("Req: Math")
-if require_sped: chips.append("Req: SPED")
-if require_ir: chips.append("Req: IR")
-if require_spanish: chips.append("Req: Spanish")
+    total_math = int(tutor_long.loc[tutor_long["coverage_subject"] == "Math", "tutor_id"].nunique())
+    total_ela = int(tutor_long.loc[tutor_long["coverage_subject"] == "ELA/Literacy", "tutor_id"].nunique())
+    total_sped = int(tutor_long.loc[tutor_long["has_sped_cert"] == True, "tutor_id"].nunique())
 
 st.markdown('<div class="sticky-summary">', unsafe_allow_html=True)
-m1, m2, m3, m4, m5 = st.columns([1, 1, 1, 1, 1])
+m1, m2, m3, m4 = st.columns([1, 1, 1, 1])
 m1.metric("Total inactive tutors", f"{total_unique:,}" if total_unique else "—")
-m2.metric("Filtered tutors", f"{filtered_unique:,}" if total_unique else "—")
-m3.metric("Math coverage (filtered)", f"{filtered_math:,}" if total_unique else "—")
-m4.metric("ELA/Lit coverage (filtered)", f"{filtered_ela:,}" if total_unique else "—")
-m5.metric("SPED certified (filtered)", f"{filtered_sped:,}" if total_unique else "—")
-
-if chips:
-    st.markdown('<div class="chips">' + "".join([f'<span class="chip">{c}</span>' for c in chips]) + "</div>", unsafe_allow_html=True)
-else:
-    st.markdown('<div class="muted">No filters applied.</div>', unsafe_allow_html=True)
-
+m2.metric("Math coverage", f"{total_math:,}" if total_unique else "—")
+m3.metric("ELA/Lit coverage", f"{total_ela:,}" if total_unique else "—")
+m4.metric("SPED certified", f"{total_sped:,}" if total_unique else "—")
+st.markdown('<div class="muted">Filters apply in the <b>Tutor Lookup</b> tab.</div>', unsafe_allow_html=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
 # -----------------------------
@@ -592,24 +518,7 @@ with tab_math:
 
                 mflt = tutor_long[(tutor_long["coverage_subject"] == "Math") & (tutor_long["math_specialty"] == specialty)].copy()
 
-                if f_grades:
-                    mflt = mflt[mflt["grade"].isin(f_grades)]
-                if f_langs:
-                    mflt = mflt.loc[mask_has_any_language(mflt, f_langs)]
-                if require_math:
-                    mflt = mflt[mflt["has_math_cert"] == True]
-                if require_sped:
-                    mflt = mflt[mflt["has_sped_cert"] == True]
-                if require_ela:
-                    mflt = mflt[mflt["has_ela_cert"] == True]
-                if require_ir:
-                    mflt = mflt[mflt["has_ir_cert"] == True]
-                if require_spanish:
-                    mflt = mflt[mflt["has_spanish_cert"] == True]
-                if search:
-                    mflt = mflt[mflt["name"].fillna("").str.contains(search, case=False)]
-
-                st.write(f"Matching tutor-grade rows: **{len(mflt):,}**")
+st.write(f"Matching tutor-grade rows: **{len(mflt):,}**")
                 st.write(f"Unique tutors: **{mflt['tutor_id'].nunique():,}**")
 
                 # Build display/export table for drill-down (one row per tutor)
@@ -665,31 +574,118 @@ with tab_lookup:
     if tutor_long.empty:
         st.info("Tutor lookup is disabled until parsed_tutor_data.json is present and readable.")
     else:
-        flt = tutor_long.copy()
+                # Build filter options
+        subjects_all, grade_tokens_all, default_tokens, specs_all, langs_all = get_lookup_filter_options(tutor_long)
 
-        if f_subjects:
-            flt = flt[flt["coverage_subject"].isin(f_subjects)]
-        if f_grades:
-            flt = flt[flt["grade"].isin(f_grades)]
+        # Filters (apply only to this tab)
+        st.markdown('<div class="filter-card">', unsafe_allow_html=True)
+        st.subheader("Filters", anchor=False)
 
-        if f_specs:
-            flt = flt[flt["math_specialty"].isin(f_specs)]
-        if f_langs:
-            flt = flt.loc[mask_has_any_language(flt, f_langs)]
+        cA, cB, cC, cD = st.columns([1.2, 1.2, 1.0, 0.6])
+        with cD:
+            if st.button("Reset", use_container_width=True):
+                for k in [
+                    "lookup_search", "lookup_f_subjects", "lookup_selected_tokens",
+                    "lookup_f_langs", "lookup_f_specs",
+                    "lookup_require_ela", "lookup_require_math", "lookup_require_sped",
+                    "lookup_require_ir", "lookup_require_spanish",
+                ]:
+                    st.session_state.pop(k, None)
+                st.rerun()
 
-        if require_ela:
-            flt = flt[flt["has_ela_cert"] == True]
-        if require_math:
-            flt = flt[flt["has_math_cert"] == True]
-        if require_sped:
-            flt = flt[flt["has_sped_cert"] == True]
-        if require_ir:
-            flt = flt[flt["has_ir_cert"] == True]
-        if require_spanish:
-            flt = flt[flt["has_spanish_cert"] == True]
+        with cA:
+            search = st.text_input(
+                "Search tutor name",
+                value=st.session_state.get("lookup_search", ""),
+            ).strip()
+            st.session_state["lookup_search"] = search
 
+            f_subjects = st.multiselect(
+                "Coverage subject",
+                subjects_all,
+                default=st.session_state.get("lookup_f_subjects", subjects_all),
+            )
+            st.session_state["lookup_f_subjects"] = f_subjects
+
+        with cB:
+            selected_tokens = st.multiselect(
+                "Grade (ES/MS/HS or individual)",
+                grade_tokens_all,
+                default=st.session_state.get("lookup_selected_tokens", default_tokens),
+            )
+            st.session_state["lookup_selected_tokens"] = selected_tokens
+
+            expanded = set()
+            for tok in selected_tokens:
+                for g in grade_token_to_grades(tok):
+                    expanded.add(int(g))
+            f_grades = sorted(expanded)
+
+            f_langs = st.multiselect(
+                "Language spoken (optional)",
+                langs_all,
+                default=st.session_state.get("lookup_f_langs", []),
+            )
+            st.session_state["lookup_f_langs"] = f_langs
+
+        with cC:
+            f_specs = st.multiselect(
+                "Math specialty (optional)",
+                specs_all,
+                default=st.session_state.get("lookup_f_specs", []),
+            )
+            st.session_state["lookup_f_specs"] = f_specs
+
+            st.caption("Certification requirements")
+            require_ela = st.checkbox("Require ELA cert", value=st.session_state.get("lookup_require_ela", False))
+            require_math = st.checkbox("Require Math cert", value=st.session_state.get("lookup_require_math", False))
+            require_sped = st.checkbox("Require SPED cert", value=st.session_state.get("lookup_require_sped", False))
+            require_ir = st.checkbox("Require IR cert", value=st.session_state.get("lookup_require_ir", False))
+            require_spanish = st.checkbox("Require Spanish cert", value=st.session_state.get("lookup_require_spanish", False))
+
+            st.session_state["lookup_require_ela"] = require_ela
+            st.session_state["lookup_require_math"] = require_math
+            st.session_state["lookup_require_sped"] = require_sped
+            st.session_state["lookup_require_ir"] = require_ir
+            st.session_state["lookup_require_spanish"] = require_spanish
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Apply filters
+        flt = apply_lookup_filters(
+            tutor_long,
+            search=search,
+            f_subjects=f_subjects,
+            f_grades=f_grades,
+            f_specs=f_specs,
+            f_langs=f_langs,
+            require_ela=require_ela,
+            require_math=require_math,
+            require_sped=require_sped,
+            require_ir=require_ir,
+            require_spanish=require_spanish,
+        )
+
+        # Summary for this tab
+        unique_filtered = int(flt["tutor_id"].nunique()) if not flt.empty else 0
+        chips = []
         if search:
-            flt = flt[flt["name"].fillna("").str.contains(search, case=False)]
+            chips.append(f"Search: {search}")
+        if f_subjects and len(f_subjects) != len(subjects_all):
+            chips.append(f"Subjects: {len(f_subjects)}")
+        if f_grades:
+            chips.append(f"Grades: {len(f_grades)}")
+        if f_langs:
+            chips.append("Lang: " + ", ".join(f_langs[:3]) + ("…" if len(f_langs) > 3 else ""))
+        if f_specs:
+            chips.append("Spec: " + ", ".join(f_specs[:2]) + ("…" if len(f_specs) > 2 else ""))
+        if require_ela: chips.append("Req: ELA")
+        if require_math: chips.append("Req: Math")
+        if require_sped: chips.append("Req: SPED")
+        if require_ir: chips.append("Req: IR")
+        if require_spanish: chips.append("Req: Spanish")
+
+        st.caption(" | ".join(chips) if chips else "No filters applied.")
 
         # Build export table (one row per tutor). Keep tutor_id for export, but hide it in the on-page table.
         agg_map = {
@@ -701,16 +697,17 @@ with tab_lookup:
         }
         if "email" in flt.columns:
             agg_map["email"] = ("email", "first")
-    
+
         tutors_df = (
             flt.groupby(["tutor_id", "name"], as_index=False)
             .agg(**agg_map)
             .sort_values("name")
         )
-    
+
         st.subheader("Results")
         st.write(f"Matching tutor-grade rows: **{len(flt):,}**")
         st.write(f"Unique tutors: **{len(tutors_df):,}**")
+
         display_df = tutors_df.drop(columns=["tutor_id"], errors="ignore")
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
@@ -722,4 +719,5 @@ with tab_lookup:
             data=out.getvalue(),
             file_name="filtered_inactive_tutors.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
         )
