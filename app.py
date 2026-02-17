@@ -449,7 +449,7 @@ with tab_overview:
                 band_df["Certified Coverage"] = cert_band.values
             st.bar_chart(band_df)
 
-        st.caption("Individual grades show unique tutors. Grade bands are culumlative and will include overlap (e.g. a tutor that is certified in K-5 will be represented five times in that grade band.")
+        st.caption("Individual grades show unique tutors. Grade bands are culumlative and will include overlap (e.g. a tutor that is certified in K-5 will be represented five times in that grade band).")
     else:
         st.info("Coverage Matrix sheet not found in the workbook.")
 
@@ -509,7 +509,7 @@ with tab_overview:
             step=5,
         )
         st.bar_chart(lang_counts.head(top_n))
-        st.caption("Y-axis = unique inactive tutors who report speaking the language.")
+        st.caption("Y-axis = Unique tutors who report speaking the language.")
 
     # -----------------------------
     # Special Certification Flags
