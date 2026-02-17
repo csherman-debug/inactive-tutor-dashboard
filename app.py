@@ -518,8 +518,8 @@ chart_band = _grouped_bar_with_labels(
 st.altair_chart(chart_band, use_container_width=True)
 st.caption("Individual grades show unique tutors. Grade bands are culumlative and will include overlap (e.g. a tutor that is certified in K-5 will be represented five times in that grade band).")
     
-#else:
-    #st.info("Coverage Matrix sheet not found in the workbook.")
+else:
+    st.info("Coverage Matrix sheet not found in the workbook.")
 
     # -----------------------------
     # Math Specialty Coverage 
