@@ -518,7 +518,7 @@ with tab_math:
 
                 mflt = tutor_long[(tutor_long["coverage_subject"] == "Math") & (tutor_long["math_specialty"] == specialty)].copy()
 
-st.write(f"Matching tutor-grade rows: **{len(mflt):,}**")
+                st.write(f"Matching tutor-grade rows: **{len(mflt):,}**")
                 st.write(f"Unique tutors: **{mflt['tutor_id'].nunique():,}**")
 
                 # Build display/export table for drill-down (one row per tutor)
