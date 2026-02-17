@@ -486,40 +486,34 @@ with tab_overview:
         else:
             total_band = make_grade_band_series(pd.Series(total_row.values, index=grade_cols))
             band_df = pd.DataFrame({"Total Coverage": total_band.values}, index=total_band.index)
-            
+
             if show_cert and cert is not None and subject in cert[subject_col].values:
                 cert_row = cert.loc[cert[subject_col] == subject, grade_cols].iloc[0].fillna(0)
                 cert_row = pd.to_numeric(cert_row, errors="coerce").fillna(0).astype(int)
                 cert_band = make_grade_band_series(pd.Series(cert_row.values, index=grade_cols))
                 band_df["Certified Coverage"] = cert_band.values
-            
+
+            # Make sure "Band" exists as a real column before melt
             band_plot = band_df.reset_index()
+            if band_plot.columns[0] != "Band":
+                band_plot = band_plot.rename(columns={band_plot.columns[0]: "Band"})
 
-# Ensure first column is named Band (avoids KeyError in melt when index isn't called "index")
+            band_long = band_plot.melt(id_vars=["Band"], var_name="Series", value_name="Count")
 
-if band_plot.columns[0] != "Band":
-    band_plot = band_plot.rename(columns={band_plot.columns[0]: "Band"})
-
-band_long = band_plot.melt(
-    id_vars=["Band"],
-    var_name="Series",
-    value_name="Count"
-)
-chart_band = _grouped_bar_with_labels(
-    band_long, 
-    x="Band", 
-    y="Count", 
-    group="Series", 
-    sort=["K-5","6-8","9-12","Other"], 
-    height=320, 
-    x_title="Grade band", 
-    y_title="Tutor count"
-)
-st.altair_chart(chart_band, use_container_width=True)
-st.caption("Individual grades show unique tutors. Grade bands are culumlative and will include overlap (e.g. a tutor that is certified in K-5 will be represented five times in that grade band).")
+            chart_band = _grouped_bar_with_labels(
+                band_long,
+                x="Band",
+                y="Count",
+                group="Series",
+                sort=["K-5", "6-8", "9-12", "Other"],
+                height=320,
+                x_title="Grade band",
+                y_title="Tutor count",
+            )
+            st.altair_chart(chart_band, use_container_width=True)
     
-else:
-    st.info("Coverage Matrix sheet not found in the workbook.")
+    else:
+        st.info("Coverage Matrix sheet not found in the workbook.")
 
     # -----------------------------
     # Math Specialty Coverage 
@@ -611,24 +605,22 @@ else:
                 other_sum = int(plot_df.iloc[top_k:][count_col].sum())
                 other = pd.DataFrame([{label_col: "Other", count_col: other_sum}])
                 plot_df = pd.concat([top, other], ignore_index=True)
-
             base = alt.Chart(plot_df).encode(
-    theta=alt.Theta(f"{count_col}:Q"),
-    color=alt.Color(f"{label_col}:N", legend=alt.Legend(orient="right")),
-    tooltip=[
-        alt.Tooltip(f"{label_col}:N", title="Flag"),
-        alt.Tooltip(f"{count_col}:Q", title="Tutors"),
-    ],
-)
+                theta=alt.Theta(f"{count_col}:Q"),
+                color=alt.Color(f"{label_col}:N", legend=alt.Legend(orient="right")),
+                tooltip=[
+                    alt.Tooltip(f"{label_col}:N", title="Flag"),
+                    alt.Tooltip(f"{count_col}:Q", title="Tutors"),
+                ],
+            )
 
-arcs = base.mark_arc()
+            arcs = base.mark_arc()
+            labels = base.mark_text(radius=90).encode(
+                text=alt.Text(f"{count_col}:Q", format=",.0f")
+            )
 
-labels = base.mark_text(radius=90).encode(
-    text=alt.Text(f"{count_col}:Q", format=",.0f")
-)
-
-st.altair_chart(arcs + labels, use_container_width=True)
-st.caption("Pie shows unique inactive tutor counts by flag (top 10 + Other).")
+            st.altair_chart(arcs + labels, use_container_width=True)
+            st.caption("Pie shows unique inactive tutor counts by flag (top 10 + Other).")
     else:
         st.divider()
         st.subheader("Special Certification Flags not found in the workbook")
