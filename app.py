@@ -238,13 +238,11 @@ def _bar_with_value_labels(df: pd.DataFrame, x: str, y: str, *, color: str | Non
 
     base = alt.Chart(df)
     bars = base.mark_bar().encode(**enc)
-    text = base.mark_text(dy=-6, color="white").encode(
+    text = base.mark_text(dy=-6).encode(
         x=enc["x"],
         y=enc["y"],
         text=alt.Text(f"{y}:Q", format=",.0f"),
     )
-    if color:
-        text = text.encode(color=alt.value("white"))
     return (bars + text).properties(height=height)
 
 def _grouped_bar_with_labels(df_long: pd.DataFrame, x: str, y: str, group: str, *, sort=None, height: int = 320, x_title: str | None = None, y_title: str | None = None):
@@ -261,7 +259,7 @@ def _grouped_bar_with_labels(df_long: pd.DataFrame, x: str, y: str, group: str, 
         )
     )
     text = (
-        base.mark_text(dy=-6, color="white")
+        base.mark_text(dy=-6)
         .encode(
             x=alt.X(f"{x}:N", sort=sort),
             y=alt.Y(f"{y}:Q"),
@@ -493,9 +491,18 @@ with tab_overview:
                 cert_row = pd.to_numeric(cert_row, errors="coerce").fillna(0).astype(int)
                 cert_band = make_grade_band_series(pd.Series(cert_row.values, index=grade_cols))
                 band_df["Certified Coverage"] = cert_band.values
-            band_plot = band_df.reset_index().rename(columns={"index": "Band"})
-            band_long = band_plot.melt(id_vars=["Band"], var_name="Series", value_name="Count")
-            chart_band = _grouped_bar_with_labels(band_long, x="Band", y="Count", group="Series", sort=["K-5","6-8","9-12","Other"], height=320, x_title="Grade band", y_title="Tutor count")
+            band_plot = band_df.reset_index()
+
+# Ensure first column is named Band (avoids KeyError in melt when index isn't called "index")
+if band_plot.columns[0] != "Band":
+    band_plot = band_plot.rename(columns={band_plot.columns[0]: "Band"})
+
+band_long = band_plot.melt(
+    id_vars=["Band"],
+    var_name="Series",
+    value_name="Count"
+)
+chart_band = _grouped_bar_with_labels(band_long, x="Band", y="Count", group="Series", sort=["K-5","6-8","9-12","Other"], height=320, x_title="Grade band", y_title="Tutor count")
             st.altair_chart(chart_band, use_container_width=True)
 
         st.caption("Individual grades show unique tutors. Grade bands are culumlative and will include overlap (e.g. a tutor that is certified in K-5 will be represented five times in that grade band).")
@@ -593,18 +600,23 @@ with tab_overview:
                 other = pd.DataFrame([{label_col: "Other", count_col: other_sum}])
                 plot_df = pd.concat([top, other], ignore_index=True)
 
-            pie = (
-                alt.Chart(plot_df)
-                .mark_arc()
-                .encode(
-                    theta=alt.Theta(f"{count_col}:Q", title="Tutors"),
-                    color=alt.Color(f"{label_col}:N", legend=alt.Legend(orient="right")),
-                    tooltip=[alt.Tooltip(f"{label_col}:N", title="Flag"), alt.Tooltip(f"{count_col}:Q", title="Tutors")],
-                )
-                .properties(height=360)
-            )
-            st.altair_chart(pie, use_container_width=True)
-            st.caption("Pie shows unique inactive tutor counts by flag (top 10 + Other).")
+            base = alt.Chart(plot_df).encode(
+    theta=alt.Theta(f"{count_col}:Q"),
+    color=alt.Color(f"{label_col}:N", legend=alt.Legend(orient="right")),
+    tooltip=[
+        alt.Tooltip(f"{label_col}:N", title="Flag"),
+        alt.Tooltip(f"{count_col}:Q", title="Tutors"),
+    ],
+)
+
+arcs = base.mark_arc()
+
+labels = base.mark_text(radius=90).encode(
+    text=alt.Text(f"{count_col}:Q", format=",.0f")
+)
+
+st.altair_chart(arcs + labels, use_container_width=True)
+st.caption("Pie shows unique inactive tutor counts by flag (top 10 + Other).")
     else:
         st.divider()
         st.subheader("Special Certification Flags not found in the workbook")
