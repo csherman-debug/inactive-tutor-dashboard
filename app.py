@@ -486,14 +486,17 @@ with tab_overview:
         else:
             total_band = make_grade_band_series(pd.Series(total_row.values, index=grade_cols))
             band_df = pd.DataFrame({"Total Coverage": total_band.values}, index=total_band.index)
+            
             if show_cert and cert is not None and subject in cert[subject_col].values:
                 cert_row = cert.loc[cert[subject_col] == subject, grade_cols].iloc[0].fillna(0)
                 cert_row = pd.to_numeric(cert_row, errors="coerce").fillna(0).astype(int)
                 cert_band = make_grade_band_series(pd.Series(cert_row.values, index=grade_cols))
                 band_df["Certified Coverage"] = cert_band.values
+            
             band_plot = band_df.reset_index()
 
 # Ensure first column is named Band (avoids KeyError in melt when index isn't called "index")
+
 if band_plot.columns[0] != "Band":
     band_plot = band_plot.rename(columns={band_plot.columns[0]: "Band"})
 
@@ -515,8 +518,8 @@ chart_band = _grouped_bar_with_labels(
 st.altair_chart(chart_band, use_container_width=True)
 st.caption("Individual grades show unique tutors. Grade bands are culumlative and will include overlap (e.g. a tutor that is certified in K-5 will be represented five times in that grade band).")
     
-else:
-    st.info("Coverage Matrix sheet not found in the workbook.")
+#else:
+    #st.info("Coverage Matrix sheet not found in the workbook.")
 
     # -----------------------------
     # Math Specialty Coverage 
