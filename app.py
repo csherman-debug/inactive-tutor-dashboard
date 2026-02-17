@@ -108,9 +108,12 @@ def build_tutor_rows(tutors: list[dict]) -> pd.DataFrame:
     for t in tutors:
         tutor_id = t.get("tutor_id")
         name = t.get("name")
-
-        email = t.get("email")
-
+        # Email is stored at top-level in parsed_tutor_data.json (preferred).
+        # If missing, try to pull it from raw_data fallbacks.
+        email = (t.get("email")
+                 or (t.get("raw_data", {}) or {}).get("personal_email")
+                 or (t.get("raw_data", {}) or {}).get("email")
+                 or (t.get("raw_data", {}) or {}).get("email_address"))
 
         langs = t.get("languages", []) or []
         langs_norm = sorted({str(x).strip() for x in langs if str(x).strip()})
@@ -457,18 +460,25 @@ if sheets and "Math Specialty Coverage" in sheets:
             st.write(f"Matching tutor-grade rows: **{len(mflt):,}**")
             st.write(f"Unique tutors: **{mflt['tutor_id'].nunique():,}**")
 
+            # Build display/export table for drill-down (one row per tutor)
+            agg_map = {
+                "grades": ("grade", lambda g: ", ".join(map(str, sorted(set(map(int, g)))))),
+                "languages": ("languages_str", "first"),
+                "certs": ("cert_subjects", lambda c: ", ".join(sorted(set(sum(c, []))))),
+            }
+            if "email" in mflt.columns:
+                agg_map["email"] = ("email", "first")
+            
             tutors_df = (
                 mflt.groupby(["tutor_id", "name"], as_index=False)
-                .agg(
-                    grades=("grade", lambda g: ", ".join(map(str, sorted(set(map(int, g)))))),
-                    languages=("languages_str", "first"),
-                    certs=("cert_subjects", lambda c: ", ".join(sorted(set(sum(c, []))))),
-                )
+                .agg(**agg_map)
                 .sort_values("name")
             )
-
-            st.dataframe(tutors_df, use_container_width=True, hide_index=True)
-
+            
+            # Render (hide tutor_id), but keep it in tutors_df for export
+            display_df = tutors_df.drop(columns=["tutor_id"], errors="ignore")
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
             specialty_safe = re.sub(r"[^A-Za-z0-9]+", "_", str(specialty)).strip("_").lower() or "specialty"
             out = io.BytesIO()
             tutors_df.to_excel(out, index=False, engine="openpyxl")
@@ -515,22 +525,28 @@ else:
     if search:
         flt = flt[flt["name"].fillna("").str.contains(search, case=False)]
 
+    # Build export table (one row per tutor). Keep tutor_id for export, but hide it in the on-page table.
+    agg_map = {
+        "subjects": ("coverage_subject", lambda s: ", ".join(sorted(set(s)))),
+        "grades": ("grade", lambda g: ", ".join(map(str, sorted(set(map(int, g)))))),
+        "specialties": ("math_specialty", lambda s: ", ".join(sorted(set([x for x in s if pd.notna(x)])))),
+        "languages": ("languages_str", "first"),
+        "certs": ("cert_subjects", lambda c: ", ".join(sorted(set(sum(c, []))))),
+    }
+    if "email" in flt.columns:
+        agg_map["email"] = ("email", "first")
+    
     tutors_df = (
         flt.groupby(["tutor_id", "name"], as_index=False)
-        .agg(
-            subjects=("coverage_subject", lambda s: ", ".join(sorted(set(s)))),
-            grades=("grade", lambda g: ", ".join(map(str, sorted(set(map(int, g)))))),
-            specialties=("math_specialty", lambda s: ", ".join(sorted(set([x for x in s if pd.notna(x)])))),
-            languages=("languages_str", "first"),
-            certs=("cert_subjects", lambda c: ", ".join(sorted(set(sum(c, []))))),
-        )
+        .agg(**agg_map)
         .sort_values("name")
     )
-
+    
     st.subheader("Results")
     st.write(f"Matching tutor-grade rows: **{len(flt):,}**")
     st.write(f"Unique tutors: **{len(tutors_df):,}**")
-    st.dataframe(tutors_df, use_container_width=True, hide_index=True)
+    display_df = tutors_df.drop(columns=["tutor_id"], errors="ignore")
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     st.subheader("Export")
     out = io.BytesIO()
