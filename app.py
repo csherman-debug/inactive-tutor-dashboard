@@ -8,6 +8,7 @@ from pathlib import Path
 
 EXCEL_FILE = "Inactive_Tutor_Executive_Report_v7_FULL_FINAL.xlsx"
 JSON_FILE  = "parsed_tutor_data.json"
+RECRUITING_CSV_FILE = "Breezy_Overview_Candidates_02-11-2026-02-17-2026.csv"
 
 st.set_page_config(page_title="Tutor Dashboard - Summaries & Lookup", layout="wide")
 st.title("Tutor Dashboard - Summaries & Lookup (Inactive Pool)")
@@ -21,6 +22,17 @@ def load_sheets(xlsx_path: str) -> dict[str, pd.DataFrame]:
 def load_json(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+@st.cache_data
+def load_recruiting_csv(path: str) -> pd.DataFrame:
+    try:
+        df = pd.read_csv(path)
+        # Expect a wide format: first column is metric name, remaining columns are dates
+        df.columns = make_unique_columns(df.columns)
+        return df
+    except Exception:
+        return pd.DataFrame()
+
 
 def make_unique_columns(cols):
     """Return list of unique column names by suffixing duplicates."""
@@ -429,7 +441,76 @@ m4.metric("SPED certified", f"{total_sped:,}" if total_unique else "—")
 # -----------------------------
 # Tabs
 # -----------------------------
-tab_overview, tab_lookup = st.tabs(["Coverage Overview", "Tutor Filter & Lookup"])
+tab_recruiting, tab_overview, tab_lookup = st.tabs(["Recruiting Stats", "Coverage Overview", "Tutor Filter & Lookup"])
+
+
+with tab_recruiting:
+    st.subheader("Recruiting Stats")
+
+    recruiting_exists = Path(RECRUITING_CSV_FILE).exists()
+    if not recruiting_exists:
+        st.info("Recruiting CSV not found. Add the Breezy export CSV to the app directory to enable this tab.")
+    else:
+        rec_wide = load_recruiting_csv(RECRUITING_CSV_FILE)
+        if rec_wide.empty or rec_wide.shape[1] < 2:
+            st.warning("Recruiting CSV loaded, but it doesn't look like the expected Breezy overview export.")
+            st.dataframe(rec_wide, use_container_width=True, hide_index=True)
+        else:
+            metric_col = rec_wide.columns[0]
+            rec_wide = rec_wide.rename(columns={metric_col: "Metric"})
+            # Long format for charts
+            rec_long = rec_wide.melt(id_vars=["Metric"], var_name="Day", value_name="Count")
+            rec_long["Count"] = pd.to_numeric(rec_long["Count"], errors="coerce").fillna(0).astype(int)
+
+            # Try to parse 'Day' like "Feb 17" into a real date (assume current year if missing)
+            try:
+                year_guess = pd.Timestamp.today().year
+                rec_long["_dt"] = pd.to_datetime(rec_long["Day"].astype(str) + f" {year_guess}", errors="coerce")
+                if rec_long["_dt"].notna().any():
+                    rec_long["Day"] = rec_long["_dt"].dt.strftime("%Y-%m-%d")
+                    day_sort = sorted(rec_long["Day"].unique().tolist())
+                else:
+                    day_sort = None
+            except Exception:
+                day_sort = None
+
+            # Summary totals by metric
+            totals = rec_long.groupby("Metric", as_index=False)["Count"].sum().sort_values("Count", ascending=False)
+            st.markdown("**Totals (selected date range)**")
+            st.altair_chart(
+                _bar_with_value_labels(totals, x="Metric", y="Count", sort=totals["Metric"].tolist(), height=320, title="Metric"),
+                use_container_width=True,
+            )
+
+            st.divider()
+            st.markdown("**Trend by day**")
+            metrics = totals["Metric"].tolist()
+            default_metrics = metrics[: min(3, len(metrics))]
+            selected = st.multiselect("Metrics to plot", metrics, default=default_metrics)
+
+            trend = rec_long[rec_long["Metric"].isin(selected)].copy()
+            if trend.empty:
+                st.info("Select one or more metrics to see the trend.")
+            else:
+                # If we created a sortable date string, use it; otherwise sort by raw day label
+                sort_days = day_sort if day_sort else sorted(trend["Day"].unique().tolist())
+
+                line = (
+                    alt.Chart(trend)
+                    .mark_line(point=True)
+                    .encode(
+                        x=alt.X("Day:N", sort=sort_days, title="Day"),
+                        y=alt.Y("Count:Q", title="Count"),
+                        color=alt.Color("Metric:N", legend=alt.Legend(orient="top")),
+                        tooltip=["Day:N", "Metric:N", "Count:Q"],
+                    )
+                    .properties(height=360)
+                )
+                st.altair_chart(line, use_container_width=True)
+
+            with st.expander("Show raw recruiting data"):
+                st.dataframe(rec_wide, use_container_width=True, hide_index=True)
+
 
 with tab_overview:
     # -----------------------------
