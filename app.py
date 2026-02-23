@@ -445,11 +445,11 @@ tab_recruiting, tab_overview, tab_lookup = st.tabs(["Recruiting Stats", "Coverag
 
 
 with tab_recruiting:
-    st.subheader("Recruiting Stats")
+    st.subheader("New Mexico Recruiting Stats")
 
     recruiting_exists = Path(RECRUITING_CSV_FILE).exists()
     if not recruiting_exists:
-        st.info("Recruiting CSV not found. Add the Breezy export CSV to the app directory to enable this tab.")
+        st.info("Recruiting CSV not found. Add the Recruiting export CSV to the app directory to enable this tab.")
     else:
         rec_wide = load_recruiting_csv(RECRUITING_CSV_FILE)
         if rec_wide.empty or rec_wide.shape[1] < 2:
