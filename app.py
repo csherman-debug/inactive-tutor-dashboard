@@ -8,7 +8,7 @@ from pathlib import Path
 
 EXCEL_FILE = "Inactive_Tutor_Executive_Report_v7_FULL_FINAL.xlsx"
 JSON_FILE  = "parsed_tutor_data.json"
-RECRUITING_CSV_FILE = "Breezy_Overview_Candidates_02-11-2026-02-17-2026.csv"
+RECRUITING_CSV_FILE = "recruiting.csv"
 
 st.set_page_config(page_title="Tutor Dashboard - Summaries & Lookup", layout="wide")
 st.title("Tutor Dashboard - Summaries & Lookup (Inactive Pool)")
